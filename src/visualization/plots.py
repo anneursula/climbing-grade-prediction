@@ -1,5 +1,7 @@
 # src/visualization/plots.py (continued)
 
+import pandas as pd
+
 def plot_grade_distribution(data, output_file=None, most_popular_only=True,
                             title=None, figsize=(12, 6)):
     """
@@ -44,7 +46,7 @@ def plot_grade_distribution(data, output_file=None, most_popular_only=True,
             return None
 
         # Process data to get grade counts
-        from ..data.processing import parse_climb_stats, find_most_popular_setup
+        from ..data.preprocessing import parse_climb_stats, find_most_popular_setup
         from ..features.grade_conversion import difficulty_to_vgrade
 
         if most_popular_only:

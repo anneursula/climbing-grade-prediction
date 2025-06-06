@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from collections import Counter
 from ..features.grade_conversion import difficulty_to_vgrade
-from .processing import parse_climb_stats, find_most_popular_setup, count_holds
+from .preprocessing import load_data, parse_climb_stats, find_most_popular_setup, count_holds
 
 def create_data_profile(data_source):
     """Create a comprehensive data profile from the Kilterboard dataset"""
@@ -363,8 +363,8 @@ def compare_climbing_dataframes(df1, df2, df1_name="Dataset 1", df2_name="Datase
     if plot:
         try:
             # Set a consistent style
-            plt.style.use('seaborn-v0_8-darkgrid')
-
+            plt.style.use('darkgrid')
+            
             # Create figure with multiple subplots
             fig, axs = plt.subplots(3, 1, figsize=(10, 12))
 
