@@ -7,7 +7,7 @@ import tensorflow as tf
 from src.data.preprocessing import load_data, create_boulder_angle_dataframe
 from src.data.analysis import create_data_profile, analyze_and_clean_data, compare_climbing_dataframes
 from src.visualization.plots import plot_grade_distribution
-from src.visualization.model_plots import plot_training_history
+from src.visualization.model_plot import plot_training_history
 from src.models.preprocessing import create_train_test_split
 from src.models.cnn_model import create_cnn_model
 

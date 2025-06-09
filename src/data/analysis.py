@@ -7,7 +7,7 @@ from ..features.grade_conversion import difficulty_to_vgrade
 from .preprocessing import load_data, parse_climb_stats, find_most_popular_setup, count_holds
 
 def create_data_profile(data_source):
-    """Create a comprehensive data profile from the Kilterboard dataset"""
+    """Create data profile"""
     df = load_data(data_source)
     if df is None:
         return None
