@@ -37,14 +37,17 @@ def encode_hold_types(placements_str):
     except:
         return [0, 0, 0, 0]
 
-def create_multichannel_grid(placements_str, grid_width=24, grid_height=18):
+
+def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_height=18):
     """
-    Create a multi-channel 2D grid representing different hold types
+    Create a multi-channel 2D grid with enhanced hold information
     
     Parameters:
     -----------
     placements_str : str or list
         String representation of holds placements or the parsed list
+    hold_data_df : pandas.DataFrame
+        DataFrame containing hold characteristics indexed by ledPosition
     grid_width : int
         Width of the grid (default: 24)
     grid_height : int
@@ -53,27 +56,37 @@ def create_multichannel_grid(placements_str, grid_width=24, grid_height=18):
     Returns:
     --------
     numpy.ndarray
-        Multi-channel grid representation of holds (shape: grid_height, grid_width, 4)
+        Multi-channel grid representation (shape: grid_height, grid_width, 7)
+        Channels: [START, MIDDLE, FINISH, FEET-ONLY, orientation, depth, type_encoded]
     """
-    # Initialize empty grid with 4 channels (START, MIDDLE, FINISH, FEET-ONLY)
-    grid = np.zeros((grid_height, grid_width, 4))
+    # Initialize grid with 7 channels
+    # 0-3: hold types (START, MIDDLE, FINISH, FEET-ONLY)
+    # 4: orientation (normalized)
+    # 5: depth (normalized) 
+    # 6: type encoded (footchip=0, other types can be added)
+    grid = np.zeros((grid_height, grid_width, 7))
 
     try:
         # Parse placements
         placements = ast.literal_eval(placements_str) if isinstance(placements_str, str) else placements_str
 
-        # Channel mappings
+        # Channel mappings for hold types
         type_to_channel = {
             'START': 0,
             'MIDDLE': 1,
             'FINISH': 2,
             'FEET-ONLY': 3
         }
+        
+        # Normalize orientation and depth values for better learning
+        max_orientation = 360.0
+        max_depth = hold_data_df['depth'].max() if 'depth' in hold_data_df.columns else 5.0
 
         # Fill grid with hold placements
         for hold in placements:
             x = hold.get('x', 0)
             y = hold.get('y', 0)
+            led_position = hold.get('ledPosition')
 
             # Normalize to grid indices
             x_idx = min(int(x * (grid_width - 1) / 24), grid_width - 1)
@@ -81,14 +94,87 @@ def create_multichannel_grid(placements_str, grid_width=24, grid_height=18):
 
             # Get hold type and map to channel
             hold_type = hold.get('type', '')
-            channel = type_to_channel.get(hold_type, 1)  # Default to MIDDLE
+            type_channel = type_to_channel.get(hold_type, 1)  # Default to MIDDLE
+            grid[y_idx, x_idx, type_channel] = 1
 
-            # Mark hold position in appropriate channel
-            grid[y_idx, x_idx, channel] = 1
+            # Add enhanced hold information if ledPosition exists in hold_data
+            if led_position is not None and led_position in hold_data_df.index:
+                hold_info = hold_data_df.loc[led_position]
+                
+                # Channel 4: Normalized orientation (0-1)
+                orientation = hold_info.get('orientation', 0)
+                grid[y_idx, x_idx, 4] = orientation / max_orientation
+                
+                # Channel 5: Normalized depth (0-1)
+                depth = hold_info.get('depth', 0)
+                grid[y_idx, x_idx, 5] = depth / max_depth
+                
+                # Channel 6: Hold physical type (could expand this)
+                physical_type = hold_info.get('type', 'footchip')
+                grid[y_idx, x_idx, 6] = 0 if physical_type == 'footchip' else 1
 
         return grid
-    except:
-        return np.zeros((grid_height, grid_width, 4))
+    except Exception as e:
+        print(f"Error creating enhanced grid: {e}")
+        return np.zeros((grid_height, grid_width, 7))
+
+def create_hold_feature_vector(placements_str, hold_data_df):
+    """
+    Create aggregated features from hold characteristics
+    
+    Parameters:
+    -----------
+    placements_str : str or list
+        String representation of holds placements
+    hold_data_df : pandas.DataFrame
+        DataFrame containing hold characteristics
+        
+    Returns:
+    --------
+    list
+        Aggregated hold features: [avg_orientation, avg_depth, std_orientation, std_depth, 
+                                  start_holds, middle_holds, finish_holds, feet_only]
+    """
+    try:
+        placements = ast.literal_eval(placements_str) if isinstance(placements_str, str) else placements_str
+        
+        orientations = []
+        depths = []
+        hold_counts = {'START': 0, 'MIDDLE': 0, 'FINISH': 0, 'FEET-ONLY': 0}
+        
+        for hold in placements:
+            led_position = hold.get('ledPosition')
+            hold_type = hold.get('type', 'MIDDLE')
+            
+            # Count hold types
+            hold_counts[hold_type] = hold_counts.get(hold_type, 0) + 1
+            
+            # Get physical characteristics
+            if led_position is not None and led_position in hold_data_df.index:
+                hold_info = hold_data_df.loc[led_position]
+                orientations.append(hold_info.get('orientation', 0))
+                depths.append(hold_info.get('depth', 0))
+        
+        # Calculate aggregated features
+        avg_orientation = np.mean(orientations) if orientations else 0
+        avg_depth = np.mean(depths) if depths else 0
+        std_orientation = np.std(orientations) if len(orientations) > 1 else 0
+        std_depth = np.std(depths) if len(depths) > 1 else 0
+        
+        return [
+            avg_orientation / 360.0,  # Normalize
+            avg_depth / 5.0,          # Normalize (assuming max depth ~5)
+            std_orientation / 360.0,
+            std_depth / 5.0,
+            hold_counts['START'],
+            hold_counts['MIDDLE'], 
+            hold_counts['FINISH'],
+            hold_counts['FEET-ONLY']
+        ]
+        
+    except Exception as e:
+        print(f"Error creating hold features: {e}")
+        return [0] * 8
 
 def v_grade_distance(v1, v2):
     """
@@ -151,7 +237,7 @@ def create_v_grade_confusion_matrix(actual, predicted):
 
     return cm
 
-def create_cnn_model(df, X_train, X_test, y_train, y_test):
+def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     """
     Create and train an improved CNN model to predict boulder grades using LED positions.
 
@@ -182,20 +268,18 @@ def create_cnn_model(df, X_train, X_test, y_train, y_test):
     X_test_scaled[feature_cols] = scaler.transform(X_test[feature_cols])
 
     # Create multichannel grids from placements
-    train_grids = np.array([create_multichannel_grid(p) for p in X_train['placements']])
-    test_grids = np.array([create_multichannel_grid(p) for p in X_test['placements']])
+    train_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_train['placements']])
+    test_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_test['placements']])
 
-    # Create hold type encodings
-    train_hold_types = np.array([encode_hold_types(p) for p in X_train['placements']])
-    test_hold_types = np.array([encode_hold_types(p) for p in X_test['placements']])
-
-    # Create input for numerical features
-    train_features = np.array(X_train_scaled[feature_cols])
-    test_features = np.array(X_test_scaled[feature_cols])
-
-    # Combine with hold type encodings
-    train_features = np.hstack((train_features, train_hold_types))
-    test_features = np.hstack((test_features, test_hold_types))
+    # Create enhanced hold feature vectors (now 8 features instead of 4)
+    train_hold_features = np.array([create_hold_feature_vector(p, hold_data_df) 
+                                   for p in X_train['placements']])
+    test_hold_features = np.array([create_hold_feature_vector(p, hold_data_df) 
+                                  for p in X_test['placements']])
+    
+    # Combine with basic numerical features
+    train_features = np.hstack((X_train_scaled[feature_cols].values, train_hold_features))
+    test_features = np.hstack((X_test_scaled[feature_cols].values, test_hold_features))
 
     # Build the CNN model with both image and numerical inputs
     # Input for the grid
@@ -203,29 +287,47 @@ def create_cnn_model(df, X_train, X_test, y_train, y_test):
 
     # CNN layers for the grid
     x = layers.Conv2D(32, (3, 3), activation='relu', padding='same')(grid_input)
+    x = layers.BatchNormalization()(x)
+    x = layers.Conv2D(32, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.Dropout(0.1)(x)
+    
+    x = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(x)
+    x = layers.BatchNormalization()(x)
     x = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.Dropout(0.1)(x)
+    
+    x = layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
+    x = layers.BatchNormalization()(x)
     x = layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.Dropout(0.2)(x)
+    
     x = layers.Flatten()(x)
-
     # Input for numerical features
-    numerical_input = layers.Input(shape=(len(feature_cols) + 4,))  # +4 for hold type encodings
+    numerical_input = layers.Input(shape=(len(feature_cols) + 8,))  # +4 for hold type encodings
 
     # Dense layers for numerical features
-    y = layers.Dense(32, activation='relu')(numerical_input)
+    y = layers.Dense(64, activation='relu')(numerical_input)
+    y = layers.BatchNormalization()(y)
+    y = layers.Dropout(0.2)(y)
+    y = layers.Dense(32, activation='relu')(y)
 
     # Combine the CNN output with numerical features
     combined = layers.concatenate([x, y])
 
     # Dense layers for combined data
-    z = layers.Dense(256, activation='relu')(combined)
-    z = layers.Dropout(0.2)(z)
+    z = layers.Dense(512, activation='relu')(combined)
+    z = layers.BatchNormalization()(z)
+    z = layers.Dropout(0.3)(z)
+    z = layers.Dense(256, activation='relu')(z)
+    z = layers.BatchNormalization()(z)
+    z = layers.Dropout(0.3)(z)
     z = layers.Dense(128, activation='relu')(z)
     z = layers.Dropout(0.2)(z)
     z = layers.Dense(64, activation='relu')(z)
-    z = layers.Dropout(0.2)(z)
+
 
     # Output layer (predicting a single continuous value)
     output = layers.Dense(1)(z)
@@ -236,8 +338,8 @@ def create_cnn_model(df, X_train, X_test, y_train, y_test):
     # Create Optimizer with learning rate schedule
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         initial_learning_rate=0.001,
-        decay_steps=1000,
-        decay_rate=0.9)
+        decay_steps=800,
+        decay_rate=0.95)
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
     # Compile model
@@ -246,12 +348,13 @@ def create_cnn_model(df, X_train, X_test, y_train, y_test):
                   metrics=['mean_absolute_error'])
 
     # Display model summary
+    print("CNN Model Architecture:")
     model.summary()
 
     # Callbacks for early stopping and model checkpoint
     early_stopping = tf.keras.callbacks.EarlyStopping(
         monitor='val_loss',
-        patience=5,
+        patience=7,
         restore_best_weights=True)
 
     # Train the model

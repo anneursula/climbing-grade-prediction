@@ -18,6 +18,8 @@ def main():
     # Load the dataset
     data_path = "data/raw/climbs.csv"
     df = load_data(data_path)
+    hold_data_df = load_data("data/processed/kilter_holds_lookup.csv")
+    hold_data_df = hold_data_df.set_index('ledPosition')
     
     if df is None:
         print("Failed to load data.")
@@ -51,7 +53,7 @@ def main():
     
     # Create and train CNN model if TensorFlow is available
     try:
-        model, history, metrics = create_cnn_model(boulder_angles_df, X_train, X_test, y_train, y_test)
+        model, history, metrics = create_cnn_model(boulder_angles_df, hold_data_df, X_train, X_test, y_train, y_test)
         
         # Plot training history
         history_plot = plot_training_history(history)

@@ -41,6 +41,9 @@ def main():
     # Load sample data
     data_path = "data/processed/full_clean_dataset.csv"
     df = load_sample_data(data_path, sample_size=500)
+
+    hold_data_df = pd.read_csv("data/processed/kilter_holds_lookup.csv")
+    hold_data_df = hold_data_df.set_index('ledPosition')
     
     # Create train/test split
     X_train, X_test, y_train, y_test = simple_train_test_split(df)
@@ -48,7 +51,7 @@ def main():
     # Train CNN model using existing function
     print("\nTraining CNN model...")
     try:
-        model, history, metrics = create_cnn_model(df, X_train, X_test, y_train, y_test)
+        model, history, metrics = create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test)
         
         print("\nTraining completed!")
         print("Final metrics:")
@@ -56,8 +59,8 @@ def main():
             print(f"  {key}: {value:.4f}")
             
         # Save model
-        model.save("models/simple_boulder_cnn.h5")
-        print("\nModel saved to models/simple_boulder_cnn.h5")
+        model.save("models/simple_boulder_cnn_withnewshit.h5")
+        print("\nModel saved to models/simple_boulder_cnn_withnewshit.h5")
         
     except Exception as e:
         print(f"Error during training: {e}")
