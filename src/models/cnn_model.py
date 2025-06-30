@@ -66,6 +66,7 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
     # 6: type encoded (footchip=0, other types can be added)
     grid = np.zeros((grid_height, grid_width, 7))
 
+
     try:
         # Parse placements
         placements = ast.literal_eval(placements_str) if isinstance(placements_str, str) else placements_str
@@ -82,15 +83,24 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
         max_orientation = 360.0
         max_depth = hold_data_df['depth'].max() if 'depth' in hold_data_df.columns else 5.0
 
+    
         # Fill grid with hold placements
         for hold in placements:
             x = hold.get('x', 0)
             y = hold.get('y', 0)
             led_position = hold.get('ledPosition')
-
-            # Normalize to grid indices
-            x_idx = min(int(x * (grid_width - 1) / 24), grid_width - 1)
-            y_idx = min(int(y * (grid_height - 1) / 36), grid_height - 1)
+        
+            x = abs(x)
+            y = abs(y)
+                
+            # Normalize to grid indices with proper bounds checking
+            # Assuming coordinates are in range [0, max_x] and [0, max_y]
+            x_idx = int(x * (grid_width - 1) / 24) if x <= 24 else grid_width - 1
+            y_idx = int(y * (grid_height - 1) / 36) if y <= 36 else grid_height - 1
+            
+            # Ensure indices are within bounds
+            x_idx = max(0, min(x_idx, grid_width - 1))
+            y_idx = max(0, min(y_idx, grid_height - 1))
 
             # Get hold type and map to channel
             hold_type = hold.get('type', '')
@@ -112,8 +122,10 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
                 # Channel 6: Hold physical type (could expand this)
                 physical_type = hold_info.get('type', 'footchip')
                 grid[y_idx, x_idx, 6] = 0 if physical_type == 'footchip' else 1
-
+            
+        
         return grid
+    
     except Exception as e:
         print(f"Error creating enhanced grid: {e}")
         return np.zeros((grid_height, grid_width, 7))
@@ -361,7 +373,7 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     history = model.fit(
         [train_grids, train_features],
         y_train,
-        epochs=30,
+        epochs=10,
         batch_size=32,
         validation_split=0.2,
         verbose=1,

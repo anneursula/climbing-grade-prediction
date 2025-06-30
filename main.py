@@ -12,42 +12,52 @@ from src.models.preprocessing import create_train_test_split
 from src.models.cnn_model import create_cnn_model
 
 def main():
+    DA = False # Set to True to run data analysis
+
     # Check TensorFlow availability
     print(f"TensorFlow version: {tf.__version__}")
-    
-    # Load the dataset
-    data_path = "data/raw/climbs.csv"
-    df = load_data(data_path)
+
     hold_data_df = load_data("data/processed/kilter_holds_lookup.csv")
     hold_data_df = hold_data_df.set_index('ledPosition')
+  
+    if DA is True: #only run the data analysis if 'DA' is set true
+        # Load the dataset
+        data_path = "data/raw/climbs.csv"
+        df = load_data(data_path)
+
+        if df is None:
+            print("Failed to load data.")
+            return
+        
+        # Create a data profile
+        profile = create_data_profile(df)
+        
+        # Plot grade distribution
+        plot_result = plot_grade_distribution(profile, 
+                                            output_file="reports/figures/grade_distribution.png", 
+                                            most_popular_only=True)
+        
+        # Clean the data
+        cleaned_df, profile, stats = analyze_and_clean_data(df, 
+                                                        upper_percentile=95, 
+                                                        save_cleaned=True, 
+                                                        output_folder="data/processed/")
+        
+        # Create boulder angle dataframe for more detailed analysis
+        boulder_angles_df = create_boulder_angle_dataframe(cleaned_df, min_ascents=2)
+        
+        # Compare original and cleaned datasets
+        comparison = compare_climbing_dataframes(df, cleaned_df, 
+                                                df1_name="Original", 
+                                                df2_name="Cleaned", 
+                                                plot=True)
+
+    else: #else, load the already cleaned dataset
+        print("Skipping data analysis. Loading pre-cleaned dataset.")
+        boulder_angles_df = load_data("data/processed/full_clean_dataset.csv")    
     
-    if df is None:
-        print("Failed to load data.")
-        return
-    
-    # Create a data profile
-    profile = create_data_profile(df)
-    
-    # Plot grade distribution
-    plot_result = plot_grade_distribution(profile, 
-                                         output_file="reports/figures/grade_distribution.png", 
-                                         most_popular_only=True)
-    
-    # Clean the data
-    cleaned_df, profile, stats = analyze_and_clean_data(df, 
-                                                       upper_percentile=95, 
-                                                       save_cleaned=True, 
-                                                       output_folder="data/processed/")
-    
-    # Create boulder angle dataframe for more detailed analysis
-    boulder_angles_df = create_boulder_angle_dataframe(cleaned_df, min_ascents=2)
-    
-    # Compare original and cleaned datasets
-    comparison = compare_climbing_dataframes(df, cleaned_df, 
-                                            df1_name="Original", 
-                                            df2_name="Cleaned", 
-                                            plot=True)
-    
+     
+
     # Create train-test split
     X_train, X_test, y_train, y_test = create_train_test_split(boulder_angles_df)
     
