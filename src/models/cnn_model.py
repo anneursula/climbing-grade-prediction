@@ -56,7 +56,7 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
     Returns:
     --------
     numpy.ndarray
-        Multi-channel grid representation (shape: grid_height, grid_width, 7)
+        Multi-channel grid representation (shape: grid_height, grid_width, 11)
         Channels: [START, MIDDLE, FINISH, FEET-ONLY, orientation, depth, type_encoded]
     """
     # Initialize grid with 7 channels
@@ -141,7 +141,7 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
         return grid
     except Exception as e:
         print(f"Error creating enhanced grid: {e}")
-        return np.zeros((grid_height, grid_width, 7))
+        return np.zeros((grid_height, grid_width, 11))
 
 def create_hold_feature_vector(placements_str, hold_data_df):
     """
