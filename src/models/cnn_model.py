@@ -197,7 +197,7 @@ def create_hold_feature_vector(placements_str, hold_data_df):
         
         return [
             avg_orientation / 360.0,  # Normalize
-            avg_depth / 5.0,          # Normalize (assuming max depth ~5)
+            avg_depth / 3.0,          # Normalize (assuming max depth ~3)
             std_orientation / 360.0,
             std_depth / 5.0,
             hold_counts['START'],
