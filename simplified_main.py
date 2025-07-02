@@ -40,7 +40,7 @@ def simple_train_test_split(df, test_size=0.2):
 def main():
     # Load sample data
     data_path = "data/processed/full_clean_dataset.csv"
-    df = load_sample_data(data_path, sample_size=500)
+    df = load_sample_data(data_path, sample_size=5000)
 
     hold_data_df = pd.read_csv("data/processed/kilter_holds_lookup.csv")
     hold_data_df = hold_data_df.set_index('ledPosition')

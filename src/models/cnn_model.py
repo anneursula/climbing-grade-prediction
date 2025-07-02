@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from ..features.grade_conversion import difficulty_to_vgrade
 
-def encode_hold_types(placements_str):
+def encode_hold_function(placements_str):
     """
     Create new feature encoding the number of each hold type
     
@@ -294,7 +294,7 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     tuple
         (model, history, evaluation_metrics)
     """
-    # Process features
+    
     # Create both standard grid and multichannel grid
     feature_cols = ['angle', 'hold_count', 'ascents']
     scaler = StandardScaler()
@@ -322,7 +322,7 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     train_features = np.hstack((X_train_scaled[feature_cols].values, train_hold_features))
     test_features = np.hstack((X_test_scaled[feature_cols].values, test_hold_features))
 
-    # Build the CNN model with both image and numerical inputs
+    # Build the CNN model with spatial and numerical inputs
     # Input for the grid
     grid_input = layers.Input(shape=train_grids.shape[1:])
 
@@ -331,19 +331,19 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     x = layers.BatchNormalization()(x)
     x = layers.Conv2D(32, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.Dropout(0.1)(x)
+    x = layers.SpatialDropout2D(0.1)(x)
     
     x = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(x)
     x = layers.BatchNormalization()(x)
     x = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.Dropout(0.1)(x)
+    x = layers.SpatialDropout2D(0.1)(x)
     
     x = layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
     x = layers.BatchNormalization()(x)
     x = layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.Dropout(0.2)(x)
+    x = layers.SpatialDropout2D(0.2)(x)
     
     x = layers.Flatten()(x)
     # Input for numerical features
