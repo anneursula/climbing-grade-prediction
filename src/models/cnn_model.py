@@ -64,8 +64,7 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
     # 4: orientation (normalized)
     # 5: depth (normalized) 
     # 6: type encoded (footchip=0, other types can be added)
-    grid = np.zeros((grid_height, grid_width, 7))
-
+    grid = np.zeros((grid_height, grid_width, 11))
 
     try:
         # Parse placements
@@ -83,13 +82,13 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
         max_orientation = 360.0
         max_depth = hold_data_df['depth'].max() if 'depth' in hold_data_df.columns else 5.0
 
-    
         # Fill grid with hold placements
         for hold in placements:
             x = hold.get('x', 0)
             y = hold.get('y', 0)
             led_position = hold.get('ledPosition')
-        
+
+            # Fix negative coordinates by taking absolute values (hammer-nail solution, but works for now)
             x = abs(x)
             y = abs(y)
                 
@@ -119,13 +118,27 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
                 depth = hold_info.get('depth', 0)
                 grid[y_idx, x_idx, 5] = depth / max_depth
                 
-                # Channel 6: Hold physical type (could expand this)
-                physical_type = hold_info.get('type', 'footchip')
-                grid[y_idx, x_idx, 6] = 0 if physical_type == 'footchip' else 1
-            
-        
+                # Channel 6-10: Hold physical types (one-hot encoding)
+                physical_type = hold_info.get('type', 'footchip').lower()
+                
+                # Map each hold type to its own channel
+                hold_type_channels = {
+                    'footchip': 6,
+                    'jug': 7,
+                    'sloper': 8,
+                    'crimp': 9,
+                    'pinch': 10
+                }
+                
+                # Set the appropriate channel to 1
+                if physical_type in hold_type_channels:
+                    channel_idx = hold_type_channels[physical_type]
+                    grid[y_idx, x_idx, channel_idx] = 1
+                else:
+                    # Default to footchip for unknown types
+                    grid[y_idx, x_idx, 6] = 1
+
         return grid
-    
     except Exception as e:
         print(f"Error creating enhanced grid: {e}")
         return np.zeros((grid_height, grid_width, 7))
@@ -145,7 +158,8 @@ def create_hold_feature_vector(placements_str, hold_data_df):
     --------
     list
         Aggregated hold features: [avg_orientation, avg_depth, std_orientation, std_depth, 
-                                  start_holds, middle_holds, finish_holds, feet_only]
+                                  start_holds, middle_holds, finish_holds, feet_only,
+                                  footchip_count, jug_count, sloper_count, crimp_count, pinch_count]
     """
     try:
         placements = ast.literal_eval(placements_str) if isinstance(placements_str, str) else placements_str
@@ -153,12 +167,13 @@ def create_hold_feature_vector(placements_str, hold_data_df):
         orientations = []
         depths = []
         hold_counts = {'START': 0, 'MIDDLE': 0, 'FINISH': 0, 'FEET-ONLY': 0}
+        physical_type_counts = {'footchip': 0, 'jug': 0, 'sloper': 0, 'crimp': 0, 'pinch': 0}
         
         for hold in placements:
             led_position = hold.get('ledPosition')
             hold_type = hold.get('type', 'MIDDLE')
             
-            # Count hold types
+            # Count hold usage types
             hold_counts[hold_type] = hold_counts.get(hold_type, 0) + 1
             
             # Get physical characteristics
@@ -166,6 +181,13 @@ def create_hold_feature_vector(placements_str, hold_data_df):
                 hold_info = hold_data_df.loc[led_position]
                 orientations.append(hold_info.get('orientation', 0))
                 depths.append(hold_info.get('depth', 0))
+                
+                # Count physical hold types
+                physical_type = hold_info.get('type', 'footchip').lower()
+                if physical_type in physical_type_counts:
+                    physical_type_counts[physical_type] += 1
+                else:
+                    physical_type_counts['footchip'] += 1  # Default unknown to footchip
         
         # Calculate aggregated features
         avg_orientation = np.mean(orientations) if orientations else 0
@@ -181,12 +203,17 @@ def create_hold_feature_vector(placements_str, hold_data_df):
             hold_counts['START'],
             hold_counts['MIDDLE'], 
             hold_counts['FINISH'],
-            hold_counts['FEET-ONLY']
+            hold_counts['FEET-ONLY'],
+            physical_type_counts['footchip'],
+            physical_type_counts['jug'],
+            physical_type_counts['sloper'],
+            physical_type_counts['crimp'],
+            physical_type_counts['pinch']
         ]
         
     except Exception as e:
         print(f"Error creating hold features: {e}")
-        return [0] * 8
+        return [0] * 13  # Now 13 features instead of 8
 
 def v_grade_distance(v1, v2):
     """
@@ -246,6 +273,8 @@ def create_v_grade_confusion_matrix(actual, predicted):
     plt.ylabel('Actual Grade')
     plt.title('V-Grade Confusion Matrix')
     plt.tight_layout()
+
+    plt.savefig("reports/figures/confusion_matrix.png", dpi=300, bbox_inches='tight')
 
     return cm
 
@@ -318,7 +347,7 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     
     x = layers.Flatten()(x)
     # Input for numerical features
-    numerical_input = layers.Input(shape=(len(feature_cols) + 8,))  # +4 for hold type encodings
+    numerical_input = layers.Input(shape=(len(feature_cols) + 13,))  # +4 for hold type encodings
 
     # Dense layers for numerical features
     y = layers.Dense(64, activation='relu')(numerical_input)

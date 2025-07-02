@@ -59,8 +59,8 @@ def main():
             print(f"  {key}: {value:.4f}")
             
         # Save model
-        model.save("models/simple_boulder_cnn_withnewshit.h5")
-        print("\nModel saved to models/simple_boulder_cnn_withnewshit.h5")
+        model.save("models/simple_boulder_cnn.h5")
+        print("\nModel saved to models/simple_boulder_cnn.h5")
         
     except Exception as e:
         print(f"Error during training: {e}")
