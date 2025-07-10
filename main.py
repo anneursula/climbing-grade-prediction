@@ -97,7 +97,7 @@ def main():
         print("TRAINING STANDARD MODEL WITH WEIGHTED EVALUATION")
         print("="*60)
         
-        model, history, metrics = create_weighted_cnn_model(boulder_angles_df, hold_data_df, X_train, X_test, y_train, y_test)
+        model, history, metrics = create_cnn_model(boulder_angles_df, hold_data_df, X_train, X_test, y_train, y_test)
         
         # Plot training history
         history_plot = plot_training_history(history)
