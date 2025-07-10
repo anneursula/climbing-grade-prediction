@@ -12,6 +12,8 @@ from src.visualization.model_plot import plot_training_history
 from src.models.preprocessing import create_train_test_split
 from src.models.cnn_model import create_cnn_model
 
+from src.models.weighted_training import create_weighted_cnn_model
+
 # Weighted metrics imports
 from src.models.weighted_metrics import (
     map_quality_to_clean_data,
@@ -95,7 +97,7 @@ def main():
         print("TRAINING STANDARD MODEL WITH WEIGHTED EVALUATION")
         print("="*60)
         
-        model, history, metrics = create_cnn_model(boulder_angles_df, hold_data_df, X_train, X_test, y_train, y_test)
+        model, history, metrics = create_weighted_cnn_model(boulder_angles_df, hold_data_df, X_train, X_test, y_train, y_test)
         
         # Plot training history
         history_plot = plot_training_history(history)
@@ -130,7 +132,7 @@ def main():
         predictions = model.predict([test_grids, test_features]).flatten()
         plot_quality_weight_analysis(
             test_quality, 
-            create_quality_weights(test_quality, weight_function='exponential'),
+            create_quality_weights(test_quality, weight_function='sigmoid'),
             y_test, 
             predictions,
             save_path="reports/figures/quality_weight_analysis.png"

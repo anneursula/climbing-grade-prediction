@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from ..features.grade_conversion import difficulty_to_vgrade
 
-def extract_quality_ratings_from_stats(climb_stats_series, target_angles=None, use_most_popular=True):
+def extract_quality_ratings(climb_stats_series, target_angles=None, use_most_popular=True):
     """
     Extract quality ratings directly from climb_stats column
     
@@ -94,7 +94,7 @@ def extract_quality_ratings_from_stats(climb_stats_series, target_angles=None, u
     return quality_series
 
 
-def create_quality_weights(quality_ratings, weight_function='exponential', min_weight=0.1, max_weight=2.0):
+def create_quality_weights(quality_ratings, weight_function='sigmoid', min_weight=0.01, max_weight=5.0):
     """
     Create weights based on quality ratings
     
