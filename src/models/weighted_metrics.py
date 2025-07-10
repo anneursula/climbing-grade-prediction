@@ -7,64 +7,94 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from ..features.grade_conversion import difficulty_to_vgrade
 
-def extract_quality_ratings(df, stats_source='climb_stats'):
+def extract_quality_ratings_from_stats(climb_stats_series, target_angles=None, use_most_popular=True):
     """
-    Extract quality ratings for each boulder-angle combination
+    Extract quality ratings directly from climb_stats column
     
     Parameters:
     -----------
-    df : pandas.DataFrame
-        DataFrame with boulder data
-    stats_source : str
-        Column name containing climb stats ('climb_stats' for original data)
+    climb_stats_series : pandas.Series
+        Series containing climb_stats data (from original unclean data)
+    target_angles : pandas.Series or list, optional
+        Specific angles to extract quality for (if data is angle-specific)
+        Should align with climb_stats_series index
+    use_most_popular : bool
+        If True and no target_angles provided, use most popular setup for each boulder
+        If False, average quality across all angles
         
     Returns:
     --------
     pandas.Series
-        Quality ratings aligned with the dataframe
+        Quality ratings aligned with the input series
     """
-    from ..data.preprocessing import parse_climb_stats
+    from ..data.preprocessing import parse_climb_stats, find_most_popular_setup
     
     quality_ratings = []
     
-    if stats_source in df.columns:
-        # For original data format with climb_stats
-        for idx, row in df.iterrows():
-            if 'angle' in row:  # This is already processed angle-specific data
-                # Look for quality in the row itself or reconstruct from climb_stats
-                if 'quality' in row:
-                    quality_ratings.append(row['quality'])
-                else:
-                    # Parse climb_stats to find quality for this angle
-                    stats_list = parse_climb_stats(row.get('climb_stats', '[]'))
-                    target_angle = row['angle']
-                    
-                    quality = None
-                    for stats in stats_list:
-                        if stats.get('angle') == target_angle:
-                            quality = stats.get('quality_average')
-                            break
-                    
-                    quality_ratings.append(quality if quality is not None else 3.0)
-            else:
-                # This is original format, use most popular setup
-                from ..data.preprocessing import find_most_popular_setup
-                popular_setup = find_most_popular_setup(row.get('climb_stats', '[]'))
-                
-                if popular_setup and 'quality_average' in popular_setup:
-                    quality_ratings.append(popular_setup['quality_average'])
-                else:
-                    quality_ratings.append(3.0)  # Default neutral quality
-    else:
-        # Assume quality is already in a column or use default
-        if 'quality' in df.columns:
-            quality_ratings = df['quality'].tolist()
-        else:
-            quality_ratings = [3.0] * len(df)  # Default neutral quality
+    print(f"Extracting quality from {len(climb_stats_series)} climb_stats entries...")
     
-    return pd.Series(quality_ratings, index=df.index)
+    successful_extractions = 0
+    default_assignments = 0
+    
+    for idx, stats_data in climb_stats_series.items():
+        extracted_quality = None
+        
+        try:
+            # Parse the climb_stats
+            stats_list = parse_climb_stats(stats_data)
+            
+            if not stats_list:
+                # No stats found
+                extracted_quality = None
+            elif target_angles is not None:
+                # Look for specific angle
+                target_angle = target_angles.loc[idx] if hasattr(target_angles, 'loc') else target_angles[idx]
+                
+                for stats in stats_list:
+                    if stats.get('angle') == target_angle:
+                        extracted_quality = stats.get('quality_average')
+                        break
+            elif use_most_popular:
+                # Use most popular setup
+                popular_setup = find_most_popular_setup(stats_data)
+                if popular_setup:
+                    extracted_quality = popular_setup.get('quality_average')
+            else:
+                # Average quality across all angles
+                qualities = [stats.get('quality_average') for stats in stats_list 
+                           if stats.get('quality_average') is not None]
+                if qualities:
+                    extracted_quality = sum(qualities) / len(qualities)
+        
+        except Exception as e:
+            print(f"Error parsing stats for index {idx}: {e}")
+            extracted_quality = None
+        
+        # Use extracted quality or default
+        if extracted_quality is not None and pd.notna(extracted_quality):
+            quality_ratings.append(float(extracted_quality))
+            successful_extractions += 1
+        else:
+            quality_ratings.append(3.0)  # Default neutral quality
+            default_assignments += 1
+    
+    print(f"Quality extraction complete:")
+    print(f"  Successful extractions: {successful_extractions}")
+    print(f"  Default assignments: {default_assignments}")
+    print(f"  Success rate: {successful_extractions/len(climb_stats_series)*100:.1f}%")
+    
+    quality_series = pd.Series(quality_ratings, index=climb_stats_series.index)
+    
+    print(f"Quality statistics:")
+    print(f"  Mean: {quality_series.mean():.3f}")
+    print(f"  Std: {quality_series.std():.3f}")
+    print(f"  Min: {quality_series.min():.3f}")
+    print(f"  Max: {quality_series.max():.3f}")
+    
+    return quality_series
 
-def create_quality_weights(quality_ratings, weight_function='sigmoid', min_weight=0.1, max_weight=2.0):
+
+def create_quality_weights(quality_ratings, weight_function='exponential', min_weight=0.1, max_weight=2.0):
     """
     Create weights based on quality ratings
     
@@ -116,6 +146,73 @@ def create_quality_weights(quality_ratings, weight_function='sigmoid', min_weigh
         raise ValueError("weight_function must be 'linear', 'exponential', or 'sigmoid'")
     
     return weights
+
+def map_quality_to_clean_data(climb_stats_series, clean_df, original_df):
+    """
+    Map quality ratings from original data to clean processed data
+    
+    Parameters:
+    -----------
+    climb_stats_series : pandas.Series
+        climb_stats column from original data
+    clean_df : pandas.DataFrame
+        Your processed clean dataset (angle-specific rows)
+    original_df : pandas.DataFrame
+        Original unclean dataset
+        
+    Returns:
+    --------
+    pandas.Series
+        Quality ratings aligned with clean_df
+    """
+    from ..data.preprocessing import parse_climb_stats
+    
+    print("Mapping quality ratings from original to clean data...")
+    
+    quality_ratings = []
+    
+    for idx, row in clean_df.iterrows():
+        boulder_name = row['name']
+        target_angle = row['angle']
+        
+        # Find this boulder in the original data
+        original_boulder = original_df[original_df['name'] == boulder_name]
+        
+        if len(original_boulder) == 0:
+            print(f"Warning: Boulder '{boulder_name}' not found in original data")
+            quality_ratings.append(3.0)
+            continue
+        
+        # Get the climb_stats for this boulder
+        original_idx = original_boulder.index[0]
+        stats_data = climb_stats_series.loc[original_idx]
+        
+        # Parse and find quality for target angle
+        extracted_quality = None
+        try:
+            stats_list = parse_climb_stats(stats_data)
+            
+            for stats in stats_list:
+                if stats.get('angle') == target_angle:
+                    extracted_quality = stats.get('quality_average')
+                    break
+        except Exception as e:
+            print(f"Error parsing stats for boulder '{boulder_name}': {e}")
+        
+        # Use extracted quality or default
+        if extracted_quality is not None and pd.notna(extracted_quality):
+            quality_ratings.append(float(extracted_quality))
+        else:
+            quality_ratings.append(3.0)
+    
+    quality_series = pd.Series(quality_ratings, index=clean_df.index)
+    
+    print(f"Quality mapping complete:")
+    print(f"  Mean: {quality_series.mean():.3f}")
+    print(f"  Std: {quality_series.std():.3f}")
+    print(f"  Non-default values: {sum(1 for x in quality_ratings if x != 3.0)}")
+    
+    return quality_series
 
 def weighted_accuracy_score(y_true, y_pred, weights, exact_match=True):
     """

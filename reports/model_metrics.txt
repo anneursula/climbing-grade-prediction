@@ -1,8 +1,8 @@
 CNN Model Evaluation Metrics
 ------------------------------
-mse: 5.9258
-rmse: 2.4343
-mae: 1.9238
-r2: 0.6235
-v_grade_accuracy: 0.2998
-v_grade_accuracy_one: 0.7635
+mse: 7.6679
+rmse: 2.7691
+mae: 2.2016
+r2: 0.5128
+v_grade_accuracy: 0.2559
+v_grade_accuracy_one: 0.6783

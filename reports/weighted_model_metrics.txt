@@ -1,0 +1,21 @@
+CNN Model Evaluation with Quality Weighting
+=============================================
+
+Standard Metrics:
+----------------
+mae: 2.2016
+rmse: 2.7691
+r2: 0.5128
+accuracy_exact: 0.2559
+accuracy_pm1: 0.6783
+
+Quality-Weighted Metrics:
+------------------------
+weighted_mae: 2.2235
+weighted_accuracy_exact: 0.2515
+weighted_accuracy_pm1: 0.6691
+
+Improvements:
+------------
+Accuracy improvement: -0.0044
+MAE improvement: -0.0219
