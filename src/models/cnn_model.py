@@ -9,6 +9,51 @@ import ast
 import matplotlib.pyplot as plt
 import seaborn as sns
 from ..features.grade_conversion import difficulty_to_vgrade
+from collections import Counter
+
+
+def create_custom_weighted_loss(grade_counts_dict):
+    """Create a TensorFlow-compatible custom loss that penalizes errors on rare grades more heavily"""
+    
+    # Pre-calculate all weights as TensorFlow constants
+    # Create a lookup table for difficulty -> weight mapping
+    difficulties = []
+    weights = []
+    
+    total_samples = sum(grade_counts_dict.values())
+    n_classes = len(grade_counts_dict)
+    
+    # Create weight mapping for each difficulty range
+    for difficulty in range(0, 45):  # Cover full range of possible difficulties
+        vgrade = difficulty_to_vgrade(difficulty)
+        count = grade_counts_dict.get(vgrade, 1)
+        weight = total_samples / (n_classes * count * count)**0.5
+        difficulties.append(float(difficulty))
+        weights.append(weight)
+    
+    # Create TensorFlow lookup table
+    difficulty_tensor = tf.constant(difficulties, dtype=tf.float32)
+    weight_tensor = tf.constant(weights, dtype=tf.float32)
+    
+    def weighted_mse_loss(y_true, y_pred):
+        # Calculate base MSE
+        base_mse = tf.square(y_true - y_pred)
+        
+        # Find closest difficulty for each y_true value to get weight
+        # Round y_true to nearest integer for lookup
+        y_true_rounded = tf.round(tf.clip_by_value(y_true, 0.0, 44.0))
+        
+        # Use tf.gather to get weights for each sample
+        indices = tf.cast(y_true_rounded, tf.int32)
+        sample_weights = tf.gather(weight_tensor, indices)
+        
+        # Apply weights to loss
+        weighted_mse = base_mse * tf.expand_dims(sample_weights, -1)
+        return tf.reduce_mean(weighted_mse)
+    
+    return weighted_mse_loss
+
+
 
 def encode_hold_function(placements_str):
     """
@@ -293,38 +338,32 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     from ..models.weighted_metrics import map_quality_to_clean_data, create_quality_weights
     from ..models.cnn_model import create_multichannel_grid, create_hold_feature_vector
 
-    # Load original data to get climb_stats (you might need to adjust this path)
-    from ..data.preprocessing import load_data
+    # Simple quality weighting using pre-processed data
     try:
-        original_df = load_data("data/raw/climbs.csv")
-        climb_stats = original_df['climb_stats']
-        
-        # Extract quality for train/test sets
-        all_quality = map_quality_to_clean_data(climb_stats, df, original_df)
-        train_quality = all_quality.loc[X_train.index]
-        test_quality = all_quality.loc[X_test.index]
-        
-        print(f"Quality weighting enabled - Train mean: {train_quality.mean():.3f}, Test mean: {test_quality.mean():.3f}")
-        
+        if 'quality_average' in X_train.columns:
+            train_quality = X_train['quality_average']
+            test_quality = X_test['quality_average']
+            
+            print(f"Quality weighting enabled - Train mean: {train_quality.mean():.3f}, Test mean: {test_quality.mean():.3f}")
+            
+            # Create quality weights for training
+            train_weights = create_quality_weights(train_quality, 
+                                                weight_function='exponential',
+                                                min_weight=0.1, 
+                                                max_weight=3.0)
+            use_weights = True
+            print(f"Using quality weights - Range: {train_weights.min():.3f} to {train_weights.max():.3f}")
+        else:
+            print("No quality_average column found in dataset")
+            train_weights = None
+            use_weights = False
+            
     except Exception as e:
-        print(f"Could not load quality data: {e}")
+        print(f"Could not use quality data: {e}")
         print("Training without quality weighting...")
-        train_quality = None
-        test_quality = None
-    
-    # Create quality weights for training if available
-    if train_quality is not None:
-        train_weights = create_quality_weights(train_quality, 
-                                             weight_function='exponential',
-                                             min_weight=0.1, 
-                                             max_weight=3.0)
-        use_weights = True
-        print(f"Using quality weights - Range: {train_weights.min():.3f} to {train_weights.max():.3f}")
-    else:
         train_weights = None
         use_weights = False
-        print("No quality weights - using standard training")
-    
+
     # Process features (same as original)
     feature_cols = ['angle', 'hold_count', 'ascents']
     scaler = StandardScaler()
@@ -334,6 +373,20 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     X_train_scaled[feature_cols] = scaler.fit_transform(X_train[feature_cols])
     X_test_scaled[feature_cols] = scaler.transform(X_test[feature_cols])
 
+    if 'quality_average' in X_train.columns:
+        feature_cols.append('quality_average')
+        print("Including quality_average as a feature")
+        
+        # Handle missing quality values before scaling
+        train_quality_mean = X_train['quality_average'].mean()
+        
+        X_train_scaled['quality_average'] = X_train['quality_average'].fillna(train_quality_mean)
+        X_test_scaled['quality_average'] = X_test['quality_average'].fillna(train_quality_mean)
+        
+        # Scale the quality feature too
+        X_train_scaled[['quality_average']] = scaler.fit_transform(X_train_scaled[['quality_average']])
+        X_test_scaled[['quality_average']] = scaler.transform(X_test_scaled[['quality_average']])
+    
     # Create multichannel grids and features
     train_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_train['placements']])
     test_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_test['placements']])
@@ -404,10 +457,17 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
         decay_rate=0.95)
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
-    # Compile model
+   # Calculate grade distribution for weighted loss
+    grade_distribution = Counter([difficulty_to_vgrade(g) for g in y_train])
+    print(f"Grade distribution: {dict(grade_distribution)}")
+
+    # Create custom weighted loss
+    custom_loss = create_custom_weighted_loss(grade_distribution)
+
+    # Compile model with weighted loss
     model.compile(optimizer=optimizer,
-                  loss='mean_squared_error',
-                  metrics=['mean_absolute_error'])
+              loss=custom_loss,  # Use custom loss instead of 'mean_squared_error'
+              metrics=['mean_absolute_error'])
 
     # Display model summary
     print("CNN Model Architecture (with quality weighting):")
