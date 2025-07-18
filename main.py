@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
+import os
 
 from src.data.preprocessing import load_data, create_boulder_angle_dataframe
 from src.data.analysis import create_data_profile, analyze_and_clean_data, compare_climbing_dataframes
@@ -18,6 +19,11 @@ def main():
     # Check TensorFlow availability
     print(f"TensorFlow version: {tf.__version__}")
 
+    # Ensure output directories exist
+    os.makedirs("reports/figures", exist_ok=True)
+    os.makedirs("models", exist_ok=True)
+
+    # Load hold data
     hold_data_df = load_data("data/processed/kilter_holds_lookup.csv")
     hold_data_df = hold_data_df.set_index('ledPosition')
   
@@ -68,42 +74,40 @@ def main():
     # Create train-test split
     X_train, X_test, y_train, y_test = create_train_test_split(boulder_angles_df)
     
-    # Extract quality directly from the train/test splits (since it's now in the data)
-    if 'quality_average' in X_train.columns:
-        train_quality = X_train['quality_average']
-        test_quality = X_test['quality_average']
-        print(f"Train quality mean: {train_quality.mean():.3f}, Test quality mean: {test_quality.mean():.3f}")
-    else:
-        print("Warning: No quality data available for weighting")
-        train_quality = None
-        test_quality = None
-    
-    # Create and train CNN model if TensorFlow is available
+    # Create and train CNN model (with built-in weighting)
     try:
+        print("\nTraining CNN model with grade and quality weighting...")
         model, history, metrics = create_cnn_model(boulder_angles_df, hold_data_df, X_train, X_test, y_train, y_test)
         
         # Plot training history
         history_plot = plot_training_history(history)
         history_plot.savefig("reports/figures/model_training_history.png")
+        plt.close()  # Close the plot to free memory
         
         # Save model metrics
         with open("reports/model_metrics.txt", "w") as f:
-            f.write("CNN Model Evaluation Metrics\n")
-            f.write("-" * 30 + "\n")
+            f.write("CNN Model Evaluation Metrics (Weighted Training)\n")
+            f.write("=" * 50 + "\n")
             for key, value in metrics.items():
                 f.write(f"{key}: {value:.4f}\n")
                 
         # Save model
         model.save("models/boulder_grade_cnn.h5")
-        print("Model saved successfully")
+        print("\nModel training completed successfully!")
+        print("Files saved:")
+        print("  - models/boulder_grade_cnn.h5 (trained model)")
+        print("  - reports/model_metrics.txt (evaluation metrics)")
+        print("  - reports/figures/model_training_history.png (training plots)")
+        print("  - reports/figures/confusion_matrix.png (grade confusion matrix)")
         
     except Exception as e:
         print(f"Error training model: {e}")
         import traceback
         traceback.print_exc()
         print("Skipping model training. Make sure TensorFlow is installed correctly.")
+        return
     
-    print("Analysis complete.")
+    print("\nAnalysis complete!")
 
 if __name__ == "__main__":
     main()

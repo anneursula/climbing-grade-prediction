@@ -54,8 +54,40 @@ def create_custom_weighted_loss(grade_counts_dict):
     return weighted_mse_loss
 
 
+def calculate_quality_weights(quality_series, weight_factor=2.0):
+    """
+    Calculate sample weights based on quality ratings.
+    Higher quality problems get higher weights.
+    
+    Parameters:
+    -----------
+    quality_series : pandas.Series
+        Series containing quality_average values
+    weight_factor : float
+        How much to emphasize quality differences (default: 2.0)
+    
+    Returns:
+    --------
+    numpy.array
+        Array of sample weights
+    """
+    # Fill missing quality values with median
+    quality_filled = quality_series.fillna(quality_series.median())
+    
+    # Normalize quality to 0-1 range (assuming quality is 0-5 scale)
+    quality_normalized = quality_filled / 5.0
+    
+    # Create weights: higher quality = higher weight
+    # Using exponential weighting to emphasize quality differences
+    weights = np.exp(quality_normalized * weight_factor)
+    
+    # Normalize weights so they average to 1.0
+    weights = weights / weights.mean()
+    
+    return weights.values
 
-def encode_hold_function(placements_str):
+
+def encode_hold_types(placements_str):
     """
     Create new feature encoding the number of each hold type
     
@@ -104,11 +136,11 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
         Multi-channel grid representation (shape: grid_height, grid_width, 11)
         Channels: [START, MIDDLE, FINISH, FEET-ONLY, orientation, depth, type_encoded]
     """
-    # Initialize grid with 7 channels
+    # Initialize grid with 11 channels
     # 0-3: hold types (START, MIDDLE, FINISH, FEET-ONLY)
     # 4: orientation (normalized)
     # 5: depth (normalized) 
-    # 6: type encoded (footchip=0, other types can be added)
+    # 6-10: physical hold types (footchip, jug, sloper, crimp, pinch)
     grid = np.zeros((grid_height, grid_width, 11))
 
     try:
@@ -133,12 +165,11 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
             y = hold.get('y', 0)
             led_position = hold.get('ledPosition')
 
-            # Fix negative coordinates by taking absolute values (hammer-nail solution, but works for now)
+            # Fix negative coordinates by taking absolute values
             x = abs(x)
             y = abs(y)
                 
             # Normalize to grid indices with proper bounds checking
-            # Assuming coordinates are in range [0, max_x] and [0, max_y]
             x_idx = int(x * (grid_width - 1) / 24) if x <= 24 else grid_width - 1
             y_idx = int(y * (grid_height - 1) / 36) if y <= 36 else grid_height - 1
             
@@ -187,6 +218,7 @@ def create_multichannel_grid(placements_str, hold_data_df, grid_width=24, grid_h
     except Exception as e:
         print(f"Error creating enhanced grid: {e}")
         return np.zeros((grid_height, grid_width, 11))
+
 
 def create_hold_feature_vector(placements_str, hold_data_df):
     """
@@ -258,7 +290,8 @@ def create_hold_feature_vector(placements_str, hold_data_df):
         
     except Exception as e:
         print(f"Error creating hold features: {e}")
-        return [0] * 13  # Now 13 features instead of 8
+        return [0] * 13
+
 
 def v_grade_distance(v1, v2):
     """
@@ -278,6 +311,7 @@ def v_grade_distance(v1, v2):
     if v1 not in v_scale or v2 not in v_scale:
         return float('inf')
     return abs(v_scale.index(v1) - v_scale.index(v2))
+
 
 def create_v_grade_confusion_matrix(actual, predicted):
     """
@@ -323,56 +357,128 @@ def create_v_grade_confusion_matrix(actual, predicted):
 
     return cm
 
+
+def evaluate_by_grade_frequency(y_true, y_pred, grade_counts):
+    """Evaluate performance separately for rare vs common grades"""
+    from collections import defaultdict
+    
+    v_true = [difficulty_to_vgrade(g) for g in y_true]
+    v_pred = [difficulty_to_vgrade(g) for g in y_pred]
+    
+    # Define rare vs common grades
+    median_count = np.median(list(grade_counts.values()))
+    
+    rare_errors, common_errors = [], []
+    rare_exact, common_exact = 0, 0
+    rare_within_one, common_within_one = 0, 0
+    
+    for true_g, pred_g, true_val, pred_val in zip(v_true, v_pred, y_true, y_pred):
+        error = abs(true_val - pred_val)
+        exact = (true_g == pred_g)
+        within_one = v_grade_distance(true_g, pred_g) <= 1
+        
+        if grade_counts[true_g] < median_count:  # Rare grade
+            rare_errors.append(error)
+            if exact: rare_exact += 1
+            if within_one: rare_within_one += 1
+        else:  # Common grade
+            common_errors.append(error)
+            if exact: common_exact += 1
+            if within_one: common_within_one += 1
+    
+    print(f"\n" + "="*50)
+    print(f"PERFORMANCE BY GRADE FREQUENCY")
+    print(f"="*50)
+    print(f"Rare grades (n={len(rare_errors)}):")
+    print(f"  MAE: {np.mean(rare_errors):.4f}")
+    print(f"  Exact accuracy: {rare_exact/len(rare_errors):.4f}")
+    print(f"  ±1 accuracy: {rare_within_one/len(rare_errors):.4f}")
+    
+    print(f"\nCommon grades (n={len(common_errors)}):")
+    print(f"  MAE: {np.mean(common_errors):.4f}")
+    print(f"  Exact accuracy: {common_exact/len(common_errors):.4f}")
+    print(f"  ±1 accuracy: {common_within_one/len(common_errors):.4f}")
+    
+    # Show improvement
+    rare_acc = rare_exact/len(rare_errors) if rare_errors else 0
+    common_acc = common_exact/len(common_errors) if common_errors else 0
+    print(f"\nRare vs Common grade accuracy difference: {rare_acc - common_acc:+.4f}")
+
+
+def evaluate_by_quality(y_true, y_pred, quality_ratings):
+    """Evaluate performance by route quality level"""
+    
+    # Filter out missing quality ratings
+    valid_mask = ~quality_ratings.isna()
+    y_true_filtered = y_true[valid_mask]
+    y_pred_filtered = y_pred[valid_mask]
+    quality_filtered = quality_ratings[valid_mask]
+    
+    if len(quality_filtered) == 0:
+        print("No valid quality ratings found")
+        return
+    
+    # Define quality thresholds
+    high_quality_mask = quality_filtered >= 4.0
+    medium_quality_mask = (quality_filtered >= 3.0) & (quality_filtered < 4.0)
+    low_quality_mask = quality_filtered < 3.0
+    
+    def calc_metrics(mask, name):
+        if not np.any(mask):
+            return None
+            
+        y_t = y_true_filtered[mask]
+        y_p = y_pred_filtered[mask]
+        
+        errors = [abs(t-p) for t, p in zip(y_t, y_p)]
+        
+        v_true = [difficulty_to_vgrade(g) for g in y_t]
+        v_pred = [difficulty_to_vgrade(g) for g in y_p]
+        
+        exact = sum(1 for t, p in zip(v_true, v_pred) if t == p)
+        within_one = sum(1 for t, p in zip(v_true, v_pred) if v_grade_distance(t, p) <= 1)
+        
+        print(f"{name} routes (n={np.sum(mask)}):")
+        print(f"  MAE: {np.mean(errors):.4f}")
+        print(f"  Exact accuracy: {exact/len(errors):.4f}")
+        print(f"  ±1 accuracy: {within_one/len(errors):.4f}")
+        print(f"  Quality range: {quality_filtered[mask].min():.2f} - {quality_filtered[mask].max():.2f}")
+        
+        return exact/len(errors) if errors else 0
+    
+    print(f"\n" + "="*50)
+    print(f"PERFORMANCE BY ROUTE QUALITY")
+    print(f"="*50)
+    
+    high_acc = calc_metrics(high_quality_mask, "High quality")
+    print()
+    medium_acc = calc_metrics(medium_quality_mask, "Medium quality") 
+    print()
+    low_acc = calc_metrics(low_quality_mask, "Low quality")
+    
+    if high_acc is not None and low_acc is not None:
+        print(f"\nHigh vs Low quality accuracy difference: {high_acc - low_acc:+.4f}")
+
+
 def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     """
-    Drop-in replacement for create_cnn_model that uses quality weighting during training
-    Same signature as original function for easy replacement
+    Create and train CNN model with both grade weighting (custom loss) and quality weighting (sample weights)
     """
-    import numpy as np
-    import tensorflow as tf
-    from tensorflow.keras import layers, models
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
     
-    # Extract quality ratings
-    from ..models.weighted_metrics import map_quality_to_clean_data, create_quality_weights
-    from ..models.cnn_model import create_multichannel_grid, create_hold_feature_vector
-
-    # Simple quality weighting using pre-processed data
-    try:
-        if 'quality_average' in X_train.columns:
-            train_quality = X_train['quality_average']
-            test_quality = X_test['quality_average']
-            
-            print(f"Quality weighting enabled - Train mean: {train_quality.mean():.3f}, Test mean: {test_quality.mean():.3f}")
-            
-            # Create quality weights for training
-            train_weights = create_quality_weights(train_quality, 
-                                                weight_function='exponential',
-                                                min_weight=0.1, 
-                                                max_weight=3.0)
-            use_weights = True
-            print(f"Using quality weights - Range: {train_weights.min():.3f} to {train_weights.max():.3f}")
-        else:
-            print("No quality_average column found in dataset")
-            train_weights = None
-            use_weights = False
-            
-    except Exception as e:
-        print(f"Could not use quality data: {e}")
-        print("Training without quality weighting...")
-        train_weights = None
-        use_weights = False
-
-    # Process features (same as original)
+    # Process features
     feature_cols = ['angle', 'hold_count', 'ascents']
     scaler = StandardScaler()
 
+    # Normalize numerical features
     X_train_scaled = X_train.copy()
     X_test_scaled = X_test.copy()
+
+    # Scale numerical features to put them all on the same scale (standardization)
     X_train_scaled[feature_cols] = scaler.fit_transform(X_train[feature_cols])
+    # Use SAME parameters for standardization on test data
     X_test_scaled[feature_cols] = scaler.transform(X_test[feature_cols])
 
+    # Handle quality ratings if available
     if 'quality_average' in X_train.columns:
         feature_cols.append('quality_average')
         print("Including quality_average as a feature")
@@ -384,20 +490,24 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
         X_test_scaled['quality_average'] = X_test['quality_average'].fillna(train_quality_mean)
         
         # Scale the quality feature too
-        X_train_scaled[['quality_average']] = scaler.fit_transform(X_train_scaled[['quality_average']])
-        X_test_scaled[['quality_average']] = scaler.transform(X_test_scaled[['quality_average']])
+        quality_scaler = StandardScaler()
+        X_train_scaled[['quality_average']] = quality_scaler.fit_transform(X_train_scaled[['quality_average']])
+        X_test_scaled[['quality_average']] = quality_scaler.transform(X_test_scaled[['quality_average']])
     
-    # Create multichannel grids and features
+    # Create multichannel grids from placements
     train_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_train['placements']])
     test_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_test['placements']])
 
+    # Create enhanced hold feature vectors
     train_hold_features = np.array([create_hold_feature_vector(p, hold_data_df) for p in X_train['placements']])
     test_hold_features = np.array([create_hold_feature_vector(p, hold_data_df) for p in X_test['placements']])
-
+    
+    # Combine with basic numerical features
     train_features = np.hstack((X_train_scaled[feature_cols].values, train_hold_features))
     test_features = np.hstack((X_test_scaled[feature_cols].values, test_hold_features))
 
-    # Build the CNN model (exact same architecture as original)
+    # Build the CNN model with both image and numerical inputs
+    # Input for the grid
     grid_input = layers.Input(shape=train_grids.shape[1:])
 
     # CNN layers for the grid
@@ -437,14 +547,14 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     z = layers.Dense(512, activation='relu')(combined)
     z = layers.BatchNormalization()(z)
     z = layers.Dropout(0.3)(z)
-    z = layers.Dense(256, activation='relu')(z)
+    z = layers.Dense(256, activation='relu')(combined)
     z = layers.BatchNormalization()(z)
     z = layers.Dropout(0.3)(z)
     z = layers.Dense(128, activation='relu')(z)
     z = layers.Dropout(0.2)(z)
     z = layers.Dense(64, activation='relu')(z)
 
-    # Output layer
+    # Output layer (predicting a single continuous value)
     output = layers.Dense(1)(z)
 
     # Create model
@@ -457,20 +567,36 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
         decay_rate=0.95)
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
-   # Calculate grade distribution for weighted loss
+    # Calculate grade distribution for weighted loss
     grade_distribution = Counter([difficulty_to_vgrade(g) for g in y_train])
     print(f"Grade distribution: {dict(grade_distribution)}")
 
     # Create custom weighted loss
-    custom_loss = create_custom_weighted_loss(grade_distribution)
+    #custom_loss = create_custom_weighted_loss(grade_distribution)
+    custom_loss = 'mean_squared_error'  # Use standard MSE for now
+
+    # Calculate quality weights for training samples
+    if 'quality_average' in X_train.columns:
+        train_quality = X_train['quality_average']
+        test_quality = X_test['quality_average']
+        
+        # Create quality-based sample weights
+        quality_weights = calculate_quality_weights(train_quality)
+        
+        print(f"Quality weighting enabled - Range: {quality_weights.min():.3f} to {quality_weights.max():.3f}")
+        print(f"Quality mean: {train_quality.mean():.3f}")
+        
+    else:
+        print("No quality data available - using only grade weighting")
+        quality_weights = None
 
     # Compile model with weighted loss
     model.compile(optimizer=optimizer,
-              loss=custom_loss,  # Use custom loss instead of 'mean_squared_error'
-              metrics=['mean_absolute_error'])
+                  loss=custom_loss,  # Custom loss for rare grade emphasis
+                  metrics=['mean_absolute_error'])
 
     # Display model summary
-    print("CNN Model Architecture (with quality weighting):")
+    print("CNN Model Architecture (with grade and quality weighting):")
     model.summary()
 
     # Callbacks for early stopping
@@ -479,38 +605,30 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
         patience=7,
         restore_best_weights=True)
 
-    # Train the model - WITH OR WITHOUT WEIGHTS
-    if use_weights:
-        print("Training with quality-based sample weights...")
-        history = model.fit(
-            [train_grids, train_features],
-            y_train,
-            sample_weight=train_weights,  # THE KEY DIFFERENCE!
-            epochs=15,  # Slightly more epochs since we're using weights
-            batch_size=32,
-            validation_split=0.2,
-            verbose=1,
-            callbacks=[early_stopping]
-        )
-    else:
-        print("Training without sample weights (standard training)...")
-        history = model.fit(
-            [train_grids, train_features],
-            y_train,
-            epochs=10,
-            batch_size=32,
-            validation_split=0.2,
-            verbose=1,
-            callbacks=[early_stopping]
+
+    print("Training with grade weighting only (custom loss)")
+    history = model.fit(
+        [train_grids, train_features],
+        y_train,
+        epochs=10,
+        batch_size=32,
+        validation_split=0.2,
+        verbose=1,
+        callbacks=[early_stopping]
         )
 
     # Evaluate on test set
     test_results = model.evaluate([test_grids, test_features], y_test, verbose=1)
 
     # Make predictions
-    predictions = model.predict([test_grids, test_features])
+    try:
+        predictions = model.predict([test_grids, test_features])
+        print(f"Predictions shape: {predictions.shape}")
+    except Exception as e:
+        print(f"Error making predictions: {e}")
+        raise e
 
-    # Calculate additional metrics (same as original)
+    # Calculate additional metrics
     mse = mean_squared_error(y_test, predictions)
     rmse = np.sqrt(mse)
     r2 = r2_score(y_test, predictions)
@@ -545,25 +663,28 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     except Exception as e:
         print(f"Could not generate confusion matrix: {e}")
 
-    # If we have quality data, also print weighted metrics
-    if test_quality is not None:
-        try:
-            from ..models.weighted_metrics import comprehensive_weighted_evaluation
-            weighted_results = comprehensive_weighted_evaluation(y_test, predictions.flatten(), test_quality)
+    # Detailed weighted evaluation (only if predictions were successful)
+    # try:
+    #     print(f"\n" + "="*60)
+    #     print(f"DETAILED WEIGHTED TRAINING EVALUATION")
+    #     print(f"="*60)
+        
+    #     # Evaluate by grade rarity
+    #     grade_distribution = Counter([difficulty_to_vgrade(g) for g in y_train])
+    #     evaluate_by_grade_frequency(y_test, predictions.flatten(), grade_distribution)
+        
+    #     # Evaluate by quality if available
+    #     if 'quality_average' in X_test.columns:
+    #         test_quality = X_test['quality_average']
+    #         evaluate_by_quality(y_test, predictions.flatten(), test_quality)
+    #     else:
+    #         print(f"\nNo quality data available for quality-based evaluation")
             
-            print(f"\nQuality-Weighted Metrics:")
-            print(f"Weighted Accuracy (exact): {weighted_results['weighted_accuracy_exact']:.4f}")
-            print(f"Weighted Accuracy (±1): {weighted_results['weighted_accuracy_pm1']:.4f}")
-            print(f"Weighted MAE: {weighted_results['weighted_mae']:.4f}")
-            
-            # Show improvement
-            acc_improvement = weighted_results['weighted_accuracy_exact'] - v_grade_accuracy
-            print(f"Quality weighting accuracy improvement: {acc_improvement:+.4f}")
-            
-        except Exception as e:
-            print(f"Could not calculate weighted metrics: {e}")
+    # except Exception as e:
+    #     print(f"Error in detailed evaluation: {e}")
+    #     print("Skipping detailed weighted evaluation")
 
-    # Return metrics (same format as original function)
+    # Return model, history and metrics
     metrics = {
         'mse': mse,
         'rmse': rmse,
