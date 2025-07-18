@@ -54,39 +54,6 @@ def create_custom_weighted_loss(grade_counts_dict):
     return weighted_mse_loss
 
 
-def calculate_quality_weights(quality_series, weight_factor=2.0):
-    """
-    Calculate sample weights based on quality ratings.
-    Higher quality problems get higher weights.
-    
-    Parameters:
-    -----------
-    quality_series : pandas.Series
-        Series containing quality_average values
-    weight_factor : float
-        How much to emphasize quality differences (default: 2.0)
-    
-    Returns:
-    --------
-    numpy.array
-        Array of sample weights
-    """
-    # Fill missing quality values with median
-    quality_filled = quality_series.fillna(quality_series.median())
-    
-    # Normalize quality to 0-1 range (assuming quality is 0-5 scale)
-    quality_normalized = quality_filled / 5.0
-    
-    # Create weights: higher quality = higher weight
-    # Using exponential weighting to emphasize quality differences
-    weights = np.exp(quality_normalized * weight_factor)
-    
-    # Normalize weights so they average to 1.0
-    weights = weights / weights.mean()
-    
-    return weights.values
-
-
 def encode_hold_types(placements_str):
     """
     Create new feature encoding the number of each hold type
@@ -358,112 +325,10 @@ def create_v_grade_confusion_matrix(actual, predicted):
     return cm
 
 
-def evaluate_by_grade_frequency(y_true, y_pred, grade_counts):
-    """Evaluate performance separately for rare vs common grades"""
-    from collections import defaultdict
-    
-    v_true = [difficulty_to_vgrade(g) for g in y_true]
-    v_pred = [difficulty_to_vgrade(g) for g in y_pred]
-    
-    # Define rare vs common grades
-    median_count = np.median(list(grade_counts.values()))
-    
-    rare_errors, common_errors = [], []
-    rare_exact, common_exact = 0, 0
-    rare_within_one, common_within_one = 0, 0
-    
-    for true_g, pred_g, true_val, pred_val in zip(v_true, v_pred, y_true, y_pred):
-        error = abs(true_val - pred_val)
-        exact = (true_g == pred_g)
-        within_one = v_grade_distance(true_g, pred_g) <= 1
-        
-        if grade_counts[true_g] < median_count:  # Rare grade
-            rare_errors.append(error)
-            if exact: rare_exact += 1
-            if within_one: rare_within_one += 1
-        else:  # Common grade
-            common_errors.append(error)
-            if exact: common_exact += 1
-            if within_one: common_within_one += 1
-    
-    print(f"\n" + "="*50)
-    print(f"PERFORMANCE BY GRADE FREQUENCY")
-    print(f"="*50)
-    print(f"Rare grades (n={len(rare_errors)}):")
-    print(f"  MAE: {np.mean(rare_errors):.4f}")
-    print(f"  Exact accuracy: {rare_exact/len(rare_errors):.4f}")
-    print(f"  ±1 accuracy: {rare_within_one/len(rare_errors):.4f}")
-    
-    print(f"\nCommon grades (n={len(common_errors)}):")
-    print(f"  MAE: {np.mean(common_errors):.4f}")
-    print(f"  Exact accuracy: {common_exact/len(common_errors):.4f}")
-    print(f"  ±1 accuracy: {common_within_one/len(common_errors):.4f}")
-    
-    # Show improvement
-    rare_acc = rare_exact/len(rare_errors) if rare_errors else 0
-    common_acc = common_exact/len(common_errors) if common_errors else 0
-    print(f"\nRare vs Common grade accuracy difference: {rare_acc - common_acc:+.4f}")
-
-
-def evaluate_by_quality(y_true, y_pred, quality_ratings):
-    """Evaluate performance by route quality level"""
-    
-    # Filter out missing quality ratings
-    valid_mask = ~quality_ratings.isna()
-    y_true_filtered = y_true[valid_mask]
-    y_pred_filtered = y_pred[valid_mask]
-    quality_filtered = quality_ratings[valid_mask]
-    
-    if len(quality_filtered) == 0:
-        print("No valid quality ratings found")
-        return
-    
-    # Define quality thresholds
-    high_quality_mask = quality_filtered >= 4.0
-    medium_quality_mask = (quality_filtered >= 3.0) & (quality_filtered < 4.0)
-    low_quality_mask = quality_filtered < 3.0
-    
-    def calc_metrics(mask, name):
-        if not np.any(mask):
-            return None
-            
-        y_t = y_true_filtered[mask]
-        y_p = y_pred_filtered[mask]
-        
-        errors = [abs(t-p) for t, p in zip(y_t, y_p)]
-        
-        v_true = [difficulty_to_vgrade(g) for g in y_t]
-        v_pred = [difficulty_to_vgrade(g) for g in y_p]
-        
-        exact = sum(1 for t, p in zip(v_true, v_pred) if t == p)
-        within_one = sum(1 for t, p in zip(v_true, v_pred) if v_grade_distance(t, p) <= 1)
-        
-        print(f"{name} routes (n={np.sum(mask)}):")
-        print(f"  MAE: {np.mean(errors):.4f}")
-        print(f"  Exact accuracy: {exact/len(errors):.4f}")
-        print(f"  ±1 accuracy: {within_one/len(errors):.4f}")
-        print(f"  Quality range: {quality_filtered[mask].min():.2f} - {quality_filtered[mask].max():.2f}")
-        
-        return exact/len(errors) if errors else 0
-    
-    print(f"\n" + "="*50)
-    print(f"PERFORMANCE BY ROUTE QUALITY")
-    print(f"="*50)
-    
-    high_acc = calc_metrics(high_quality_mask, "High quality")
-    print()
-    medium_acc = calc_metrics(medium_quality_mask, "Medium quality") 
-    print()
-    low_acc = calc_metrics(low_quality_mask, "Low quality")
-    
-    if high_acc is not None and low_acc is not None:
-        print(f"\nHigh vs Low quality accuracy difference: {high_acc - low_acc:+.4f}")
-
-
 def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     """
-    Create and train CNN model with both grade weighting (custom loss) and quality weighting (sample weights)
-    """
+Create and train CNN model with standard training (no custom weighting)
+   """
     
     # Process features
     feature_cols = ['angle', 'hold_count', 'ascents']
@@ -515,19 +380,19 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     x = layers.BatchNormalization()(x)
     x = layers.Conv2D(32, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.Dropout(0.1)(x)
+    x = layers.Dropout(0.05)(x)
     
     x = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(x)
     x = layers.BatchNormalization()(x)
     x = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.Dropout(0.1)(x)
+    x = layers.Dropout(0.05)(x)
     
     x = layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
     x = layers.BatchNormalization()(x)
     x = layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.Dropout(0.2)(x)
+    x = layers.Dropout(0.1)(x)
     
     x = layers.Flatten()(x)
 
@@ -537,22 +402,22 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     # Dense layers for numerical features
     y = layers.Dense(64, activation='relu')(numerical_input)
     y = layers.BatchNormalization()(y)
-    y = layers.Dropout(0.2)(y)
+    y = layers.Dropout(0.1)(y)
     y = layers.Dense(32, activation='relu')(y)
 
     # Combine the CNN output with numerical features
     combined = layers.concatenate([x, y])
 
     # Dense layers for combined data
+    z = layers.Dense(1024, activation='relu')(combined)
+    z = layers.BatchNormalization()(z)
+    z = layers.Dropout(0.2)(z)
     z = layers.Dense(512, activation='relu')(combined)
     z = layers.BatchNormalization()(z)
-    z = layers.Dropout(0.3)(z)
-    z = layers.Dense(256, activation='relu')(combined)
-    z = layers.BatchNormalization()(z)
-    z = layers.Dropout(0.3)(z)
-    z = layers.Dense(128, activation='relu')(z)
     z = layers.Dropout(0.2)(z)
-    z = layers.Dense(64, activation='relu')(z)
+    z = layers.Dense(256, activation='relu')(z)
+    z = layers.Dropout(0.2)(z)
+    z = layers.Dense(128, activation='relu')(z)
 
     # Output layer (predicting a single continuous value)
     output = layers.Dense(1)(z)
@@ -575,20 +440,6 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     #custom_loss = create_custom_weighted_loss(grade_distribution)
     custom_loss = 'mean_squared_error'  # Use standard MSE for now
 
-    # Calculate quality weights for training samples
-    if 'quality_average' in X_train.columns:
-        train_quality = X_train['quality_average']
-        test_quality = X_test['quality_average']
-        
-        # Create quality-based sample weights
-        quality_weights = calculate_quality_weights(train_quality)
-        
-        print(f"Quality weighting enabled - Range: {quality_weights.min():.3f} to {quality_weights.max():.3f}")
-        print(f"Quality mean: {train_quality.mean():.3f}")
-        
-    else:
-        print("No quality data available - using only grade weighting")
-        quality_weights = None
 
     # Compile model with weighted loss
     model.compile(optimizer=optimizer,
@@ -602,16 +453,16 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     # Callbacks for early stopping
     early_stopping = tf.keras.callbacks.EarlyStopping(
         monitor='val_loss',
-        patience=7,
+        patience=15,
         restore_best_weights=True)
 
 
-    print("Training with grade weighting only (custom loss)")
+    print("Training with standard MSE loss")
     history = model.fit(
         [train_grids, train_features],
         y_train,
-        epochs=10,
-        batch_size=32,
+        epochs=25,
+        batch_size=64,
         validation_split=0.2,
         verbose=1,
         callbacks=[early_stopping]
@@ -663,26 +514,6 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
     except Exception as e:
         print(f"Could not generate confusion matrix: {e}")
 
-    # Detailed weighted evaluation (only if predictions were successful)
-    # try:
-    #     print(f"\n" + "="*60)
-    #     print(f"DETAILED WEIGHTED TRAINING EVALUATION")
-    #     print(f"="*60)
-        
-    #     # Evaluate by grade rarity
-    #     grade_distribution = Counter([difficulty_to_vgrade(g) for g in y_train])
-    #     evaluate_by_grade_frequency(y_test, predictions.flatten(), grade_distribution)
-        
-    #     # Evaluate by quality if available
-    #     if 'quality_average' in X_test.columns:
-    #         test_quality = X_test['quality_average']
-    #         evaluate_by_quality(y_test, predictions.flatten(), test_quality)
-    #     else:
-    #         print(f"\nNo quality data available for quality-based evaluation")
-            
-    # except Exception as e:
-    #     print(f"Error in detailed evaluation: {e}")
-    #     print("Skipping detailed weighted evaluation")
 
     # Return model, history and metrics
     metrics = {

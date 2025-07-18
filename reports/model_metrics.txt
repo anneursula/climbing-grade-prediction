@@ -1,8 +1,0 @@
-CNN Model Evaluation Metrics (Weighted Training)
-==================================================
-mse: 5.2652
-rmse: 2.2946
-mae: 1.7739
-r2: 0.6654
-v_grade_accuracy: 0.3371
-v_grade_accuracy_one: 0.8119
