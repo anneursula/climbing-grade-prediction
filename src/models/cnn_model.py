@@ -331,7 +331,7 @@ Create and train CNN model with standard training (no custom weighting)
    """
     
     # Process features
-    feature_cols = ['angle', 'hold_count', 'ascents']
+    feature_cols = ['angle', 'hold_count', 'ascents', 'quality_average']
     scaler = StandardScaler()
 
     # Normalize numerical features
@@ -343,22 +343,7 @@ Create and train CNN model with standard training (no custom weighting)
     # Use SAME parameters for standardization on test data
     X_test_scaled[feature_cols] = scaler.transform(X_test[feature_cols])
 
-    # Handle quality ratings if available
-    if 'quality_average' in X_train.columns:
-        feature_cols.append('quality_average')
-        print("Including quality_average as a feature")
-        
-        # Handle missing quality values before scaling
-        train_quality_mean = X_train['quality_average'].mean()
-        
-        X_train_scaled['quality_average'] = X_train['quality_average'].fillna(train_quality_mean)
-        X_test_scaled['quality_average'] = X_test['quality_average'].fillna(train_quality_mean)
-        
-        # Scale the quality feature too
-        quality_scaler = StandardScaler()
-        X_train_scaled[['quality_average']] = quality_scaler.fit_transform(X_train_scaled[['quality_average']])
-        X_test_scaled[['quality_average']] = quality_scaler.transform(X_test_scaled[['quality_average']])
-    
+   
     # Create multichannel grids from placements
     train_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_train['placements']])
     test_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_test['placements']])
@@ -447,7 +432,7 @@ Create and train CNN model with standard training (no custom weighting)
                   metrics=['mean_absolute_error'])
 
     # Display model summary
-    print("CNN Model Architecture (with grade and quality weighting):")
+    print("CNN Model Architecture with standard weights + loss:")
     model.summary()
 
     # Callbacks for early stopping

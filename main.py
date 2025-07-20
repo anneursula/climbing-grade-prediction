@@ -61,7 +61,7 @@ def main():
 
     else: #else, load the already cleaned dataset with quality ratings
         print("Skipping data analysis. Loading pre-cleaned dataset with quality ratings.")
-        boulder_angles_df = load_data("data/processed/clean_quality_data.csv")
+        boulder_angles_df = load_data("data/processed/cleaner_quality_data.csv")
 
         # Verify quality ratings are present
         if 'quality_average' in boulder_angles_df.columns:
