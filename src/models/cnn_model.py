@@ -8,7 +8,7 @@ from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 import ast
 import matplotlib.pyplot as plt
 import seaborn as sns
-from ..features.grade_conversion import difficulty_to_vgrade
+from ..features.grade_conversion import difficulty_to_vgrade, vgrade_to_difficulty
 from collections import Counter
 
 
@@ -325,7 +325,7 @@ def create_v_grade_confusion_matrix(actual, predicted):
     return cm
 
 
-def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test):
+def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test, loss_name="mean_squared_error"):
     """
 Create and train CNN model with standard training (no custom weighting)
    """
@@ -397,16 +397,17 @@ Create and train CNN model with standard training (no custom weighting)
     z = layers.Dense(1024, activation='relu')(combined)
     z = layers.BatchNormalization()(z)
     z = layers.Dropout(0.2)(z)
-    z = layers.Dense(512, activation='relu')(combined)
+    z = layers.Dense(512, activation='relu')(z)
     z = layers.BatchNormalization()(z)
     z = layers.Dropout(0.2)(z)
     z = layers.Dense(256, activation='relu')(z)
     z = layers.Dropout(0.2)(z)
     z = layers.Dense(128, activation='relu')(z)
 
-    # Output layer (predicting a single continuous value)
-    output = layers.Dense(1)(z)
-
+    z = layers.Dense(64, activation='relu')(z)
+    z = layers.Dropout(0.2)(z)
+    output = layers.Dense(1)(z)  # Single continuous output
+    
     # Create model
     model = models.Model(inputs=[grid_input, numerical_input], outputs=output)
 
@@ -417,18 +418,23 @@ Create and train CNN model with standard training (no custom weighting)
         decay_rate=0.95)
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
-    # Calculate grade distribution for weighted loss
-    grade_distribution = Counter([difficulty_to_vgrade(g) for g in y_train])
-    print(f"Grade distribution: {dict(grade_distribution)}")
 
-    # Create custom weighted loss
-    #custom_loss = create_custom_weighted_loss(grade_distribution)
-    custom_loss = 'mean_squared_error'  # Use standard MSE for now
+    # choose the loss function 
+    if loss_name == "custom_loss":
+        # Create custom weighted loss function
+        # Calculate grade distribution for weighted loss
+        grade_distribution = Counter([difficulty_to_vgrade(g) for g in y_train])
+        print(f"Grade distribution: {dict(grade_distribution)}")
 
+        loss = create_custom_weighted_loss(grade_distribution)
+    else:
+        # Use given loss
+        print("using {loss_name} loss")
+        loss = loss_name 
 
     # Compile model with weighted loss
     model.compile(optimizer=optimizer,
-                  loss=custom_loss,  # Custom loss for rare grade emphasis
+                  loss=loss,  # Custom loss for rare grade emphasis
                   metrics=['mean_absolute_error'])
 
     # Display model summary
@@ -442,7 +448,7 @@ Create and train CNN model with standard training (no custom weighting)
         restore_best_weights=True)
 
 
-    print("Training with standard MSE loss")
+    print("Training with {loss_name} loss")
     history = model.fit(
         [train_grids, train_features],
         y_train,
@@ -457,13 +463,9 @@ Create and train CNN model with standard training (no custom weighting)
     test_results = model.evaluate([test_grids, test_features], y_test, verbose=1)
 
     # Make predictions
-    try:
-        predictions = model.predict([test_grids, test_features])
-        print(f"Predictions shape: {predictions.shape}")
-    except Exception as e:
-        print(f"Error making predictions: {e}")
-        raise e
-
+    predictions = model.predict([test_grids, test_features])
+    print(f"Predictions shape: {predictions.shape}")
+    
     # Calculate additional metrics
     mse = mean_squared_error(y_test, predictions)
     rmse = np.sqrt(mse)
@@ -510,4 +512,4 @@ Create and train CNN model with standard training (no custom weighting)
         'v_grade_accuracy_one': v_grade_accuracy_one
     }
 
-    return model, history, metrics
+    return model, history, metrics, loss_name
