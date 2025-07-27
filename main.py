@@ -81,7 +81,7 @@ def main():
         
         # Plot training history
         history_plot = plot_training_history(history)
-        history_plot.savefig("reports/figures/model_training_history.png")
+        history_plot.savefig("reports/figures/model_training_history_{loss_name}.png")
         plt.close()  # Close the plot to free memory
         
         # Save model metrics

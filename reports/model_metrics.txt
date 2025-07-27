@@ -1,0 +1,8 @@
+CNN Model Evaluation Metrics 
+==================================================
+mse: 5.2340
+rmse: 2.2878
+mae: 1.7909
+r2: 0.6725
+v_grade_accuracy: 0.3265
+v_grade_accuracy_one: 0.7908
