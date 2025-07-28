@@ -1,4 +1,4 @@
-# main.py - Clean version using pre-processed quality data
+# main.py - Clean version using enhanced CNN
 
 import pandas as pd
 import numpy as np
@@ -11,7 +11,7 @@ from src.data.analysis import create_data_profile, analyze_and_clean_data, compa
 from src.visualization.plots import plot_grade_distribution
 from src.visualization.model_plot import plot_training_history
 from src.models.preprocessing import create_train_test_split
-from src.models.cnn_model import create_cnn_model
+from src.models.cnn_model import create_enhanced_cnn_model
 
 def main():
     DA = False # Set to True to run data analysis
@@ -74,30 +74,30 @@ def main():
     # Create train-test split
     X_train, X_test, y_train, y_test = create_train_test_split(boulder_angles_df)
     
-    # Create and train CNN model (with built-in weighting)
+    # Create and train Enhanced CNN model
     try:
-        print("\nTraining CNN model with either custom loss or other specified loss...")
-        model, history, metrics, loss_name = create_cnn_model(boulder_angles_df, hold_data_df, X_train, X_test, y_train, y_test, loss_name="custom_loss")
+        print("\nTraining Enhanced CNN model with attention mechanisms and residual connections...")
+        model, history, metrics = create_enhanced_cnn_model(boulder_angles_df, hold_data_df, X_train, X_test, y_train, y_test)
         
         # Plot training history
         history_plot = plot_training_history(history)
-        history_plot.savefig("reports/figures/model_training_history_{loss_name}.png")
+        history_plot.savefig("reports/figures/enhanced_model_training_history.png")
         plt.close()  # Close the plot to free memory
         
         # Save model metrics
-        with open("reports/model_metrics.txt", "w") as f:
-            f.write("CNN Model Evaluation Metrics \n")
+        with open("reports/enhanced_model_metrics.txt", "w") as f:
+            f.write("Enhanced CNN Model Evaluation Metrics\n")
             f.write("=" * 50 + "\n")
             for key, value in metrics.items():
                 f.write(f"{key}: {value:.4f}\n")
                 
         # Save model
-        model.save("models/boulder_grade_cnn_{loss_name}.h5")
-        print("\nModel training completed successfully!")
+        model.save("models/enhanced_boulder_grade_cnn.h5")
+        print("\nEnhanced model training completed successfully!")
         print("Files saved:")
-        print("  - models/boulder_grade_cnn.h5 (trained model)")
-        print("  - reports/model_metrics.txt (evaluation metrics)")
-        print("  - reports/figures/model_training_history.png (training plots)")
+        print("  - models/enhanced_boulder_grade_cnn.h5 (trained model)")
+        print("  - reports/enhanced_model_metrics.txt (evaluation metrics)")
+        print("  - reports/figures/enhanced_model_training_history.png (training plots)")
         print("  - reports/figures/confusion_matrix.png (grade confusion matrix)")
         
     except Exception as e:
