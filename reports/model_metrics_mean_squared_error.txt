@@ -1,0 +1,10 @@
+CNN Model Evaluation Metrics - Mean Squared Error
+==================================================
+Loss Function Used: Mean Squared Error
+--------------------------------------------------
+mse: 5.1684
+rmse: 2.2734
+mae: 1.7577
+r2: 0.6746
+v_grade_accuracy: 0.3467
+v_grade_accuracy_one: 0.8243

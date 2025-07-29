@@ -74,31 +74,52 @@ def main():
     # Create train-test split
     X_train, X_test, y_train, y_test = create_train_test_split(boulder_angles_df)
     
-    # Create and train CNN model (with built-in weighting)
+    # Create and train CNN model with specified loss function
     try:
-        print("\nTraining CNN model with either custom loss or other specified loss...")
-        model, history, metrics, loss_name = create_cnn_model(boulder_angles_df, hold_data_df, X_train, X_test, y_train, y_test, loss_name="custom_loss")
+        # SPECIFY WHICH LOSS TO USE HERE:
+        loss_to_use = "custom_loss"  # Change this to "mean_squared_error", "mean_absolute_error", etc.
+        
+        print(f"\nTraining CNN model with {loss_to_use} loss...")
+        model, history, metrics, loss_display_name = create_cnn_model(
+            boulder_angles_df, hold_data_df, X_train, X_test, y_train, y_test, 
+            loss_name=loss_to_use
+        )
+        
+        # Create file names that include the loss function name (sanitized for filenames)
+        safe_loss_name = loss_display_name.replace(' ', '_').replace('/', '_').lower()
         
         # Plot training history
         history_plot = plot_training_history(history)
-        history_plot.savefig("reports/figures/model_training_history_{loss_name}.png")
+        history_plot.savefig(f"reports/figures/model_training_history_{safe_loss_name}.png")
         plt.close()  # Close the plot to free memory
         
-        # Save model metrics
-        with open("reports/model_metrics.txt", "w") as f:
-            f.write("CNN Model Evaluation Metrics \n")
+        # Save model metrics with loss name in filename
+        with open(f"reports/model_metrics_{safe_loss_name}.txt", "w") as f:
+            f.write(f"CNN Model Evaluation Metrics - {loss_display_name}\n")
             f.write("=" * 50 + "\n")
+            f.write(f"Loss Function Used: {loss_display_name}\n")
+            f.write("-" * 50 + "\n")
             for key, value in metrics.items():
                 f.write(f"{key}: {value:.4f}\n")
                 
-        # Save model
-        model.save("models/boulder_grade_cnn_{loss_name}.h5")
-        print("\nModel training completed successfully!")
+        # Save model with loss name in filename
+        model.save(f"models/boulder_grade_cnn_{safe_loss_name}.h5")
+        
+        print(f"\nModel training completed successfully using {loss_display_name}!")
         print("Files saved:")
-        print("  - models/boulder_grade_cnn.h5 (trained model)")
-        print("  - reports/model_metrics.txt (evaluation metrics)")
-        print("  - reports/figures/model_training_history.png (training plots)")
-        print("  - reports/figures/confusion_matrix.png (grade confusion matrix)")
+        print(f"  - models/boulder_grade_cnn_{safe_loss_name}.h5 (trained model)")
+        print(f"  - reports/model_metrics_{safe_loss_name}.txt (evaluation metrics)")
+        print(f"  - reports/figures/model_training_history_{safe_loss_name}.png (training plots)")
+        print(f"  - reports/figures/confusion_matrix_{safe_loss_name}.png (grade confusion matrix)")
+        
+        # Print a summary of the results
+        print(f"\n" + "="*60)
+        print(f"RESULTS SUMMARY - {loss_display_name}")
+        print(f"="*60)
+        print(f"Mean Absolute Error: {metrics['mae']:.4f}")
+        print(f"R² Score: {metrics['r2']:.4f}")
+        print(f"V-grade Exact Accuracy: {metrics['v_grade_accuracy']:.4f} ({metrics['v_grade_accuracy']*100:.1f}%)")
+        print(f"V-grade ±1 Accuracy: {metrics['v_grade_accuracy_one']:.4f} ({metrics['v_grade_accuracy_one']*100:.1f}%)")
         
     except Exception as e:
         print(f"Error training model: {e}")

@@ -12,46 +12,40 @@ from ..features.grade_conversion import difficulty_to_vgrade, vgrade_to_difficul
 from collections import Counter
 
 
-def create_custom_weighted_loss(grade_counts_dict):
-    """Create a TensorFlow-compatible custom loss that penalizes errors on rare grades more heavily"""
-    
-    # Pre-calculate all weights as TensorFlow constants
-    # Create a lookup table for difficulty -> weight mapping
-    difficulties = []
-    weights = []
+def create_simple_balanced_loss(grade_counts_dict):
+    """Simpler version with class balancing similar to sklearn"""
     
     total_samples = sum(grade_counts_dict.values())
     n_classes = len(grade_counts_dict)
     
-    # Create weight mapping for each difficulty range
-    for difficulty in range(0, 45):  # Cover full range of possible difficulties
+    difficulties = []
+    weights = []
+    
+    for difficulty in range(0, 45):
         vgrade = difficulty_to_vgrade(difficulty)
         count = grade_counts_dict.get(vgrade, 1)
-        weight = total_samples / (n_classes * count * count)**0.5
+        
+        # Standard class balancing: total_samples / (n_classes * count)
+        weight = total_samples / (n_classes * count)
+        
+        # But cap the weights to prevent extremes
+        weight = min(weight, 5.0)  # No weight more than 5x
+        
         difficulties.append(float(difficulty))
         weights.append(weight)
     
-    # Create TensorFlow lookup table
     difficulty_tensor = tf.constant(difficulties, dtype=tf.float32)
     weight_tensor = tf.constant(weights, dtype=tf.float32)
     
-    def weighted_mse_loss(y_true, y_pred):
-        # Calculate base MSE
+    def simple_weighted_mse_loss(y_true, y_pred):
         base_mse = tf.square(y_true - y_pred)
-        
-        # Find closest difficulty for each y_true value to get weight
-        # Round y_true to nearest integer for lookup
         y_true_rounded = tf.round(tf.clip_by_value(y_true, 0.0, 44.0))
-        
-        # Use tf.gather to get weights for each sample
         indices = tf.cast(y_true_rounded, tf.int32)
         sample_weights = tf.gather(weight_tensor, indices)
-        
-        # Apply weights to loss
         weighted_mse = base_mse * tf.expand_dims(sample_weights, -1)
         return tf.reduce_mean(weighted_mse)
     
-    return weighted_mse_loss
+    return simple_weighted_mse_loss
 
 
 def encode_hold_types(placements_str):
@@ -327,23 +321,52 @@ def create_v_grade_confusion_matrix(actual, predicted):
 
 def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test, loss_name="mean_squared_error"):
     """
-Create and train CNN model with standard training (no custom weighting)
-   """
+    Create and train CNN model with configurable loss function
+    """
     
     # Process features
     feature_cols = ['angle', 'hold_count', 'ascents', 'quality_average']
+    
+    X_train_clipped = X_train.copy()
+    X_test_clipped = X_test.copy()
+    
+    # Clip ascents to 99th percentile to handle extreme outliers
+    ascents_cap = X_train['ascents'].quantile(0.99)
+    affected_train = (X_train['ascents'] > ascents_cap).sum()
+    affected_test = (X_test['ascents'] > ascents_cap).sum()
+    
+    print(f"Clipping ascents above {ascents_cap:.1f}")
+    print(f"  Affects {affected_train} training samples ({affected_train/len(X_train)*100:.1f}%)")
+    print(f"  Affects {affected_test} test samples ({affected_test/len(X_test)*100:.1f}%)")
+    
+    X_train_clipped['ascents'] = X_train['ascents'].clip(upper=ascents_cap)
+    X_test_clipped['ascents'] = X_test['ascents'].clip(upper=ascents_cap)
+    
+    
     scaler = StandardScaler()
 
     # Normalize numerical features
-    X_train_scaled = X_train.copy()
-    X_test_scaled = X_test.copy()
+    
+    X_train_scaled = X_train_clipped.copy()
+    X_test_scaled = X_test_clipped.copy()
 
     # Scale numerical features to put them all on the same scale (standardization)
-    X_train_scaled[feature_cols] = scaler.fit_transform(X_train[feature_cols])
+    X_train_scaled[feature_cols] = scaler.fit_transform(X_train_clipped[feature_cols])
     # Use SAME parameters for standardization on test data
-    X_test_scaled[feature_cols] = scaler.transform(X_test[feature_cols])
+    X_test_scaled[feature_cols] = scaler.transform(X_test_clipped[feature_cols])
 
+    # Verify scaling worked properly
+    print("Feature ranges after clipping + scaling:")
+    for col in feature_cols:
+        col_min = X_train_scaled[col].min()
+        col_max = X_train_scaled[col].max()
+        print(f"  {col}: {col_min:.2f} to {col_max:.2f}")
+        if abs(col_max) > 10 or abs(col_min) > 10:
+            print(f"    ⚠️  WARNING: {col} still has extreme values!")
+        else:
+            print(f"    ✓ {col} looks good!")
    
+
     # Create multichannel grids from placements
     train_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_train['placements']])
     test_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_test['placements']])
@@ -418,27 +441,27 @@ Create and train CNN model with standard training (no custom weighting)
         decay_rate=0.95)
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
-
-    # choose the loss function 
+    # Choose the loss function 
     if loss_name == "custom_loss":
         # Create custom weighted loss function
         # Calculate grade distribution for weighted loss
         grade_distribution = Counter([difficulty_to_vgrade(g) for g in y_train])
         print(f"Grade distribution: {dict(grade_distribution)}")
 
-        loss = create_custom_weighted_loss(grade_distribution)
+        loss_function = create_simple_balanced_loss(grade_distribution)
+        loss_display_name = "Custom Weighted MSE"
     else:
-        # Use given loss
-        print("using {loss_name} loss")
-        loss = loss_name 
+        # Use standard loss
+        loss_function = loss_name
+        loss_display_name = loss_name.replace('_', ' ').title()
 
-    # Compile model with weighted loss
+    # Compile model with chosen loss
     model.compile(optimizer=optimizer,
-                  loss=loss,  # Custom loss for rare grade emphasis
+                  loss=loss_function,
                   metrics=['mean_absolute_error'])
 
-    # Display model summary
-    print("CNN Model Architecture with standard weights + loss:")
+    # Display model summary with correct loss name
+    print(f"CNN Model Architecture using {loss_display_name} loss:")
     model.summary()
 
     # Callbacks for early stopping
@@ -447,8 +470,8 @@ Create and train CNN model with standard training (no custom weighting)
         patience=15,
         restore_best_weights=True)
 
-
-    print("Training with {loss_name} loss")
+    # Train with correct loss name display
+    print(f"Training with {loss_display_name} loss")
     history = model.fit(
         [train_grids, train_features],
         y_train,
@@ -472,7 +495,7 @@ Create and train CNN model with standard training (no custom weighting)
     r2 = r2_score(y_test, predictions)
     mae = mean_absolute_error(y_test, predictions)
 
-    print("\nModel Evaluation:")
+    print(f"\nModel Evaluation using {loss_display_name}:")
     print(f"Mean Squared Error: {mse:.4f}")
     print(f"Root Mean Squared Error: {rmse:.4f}")
     print(f"Mean Absolute Error: {mae:.4f}")
@@ -501,7 +524,6 @@ Create and train CNN model with standard training (no custom weighting)
     except Exception as e:
         print(f"Could not generate confusion matrix: {e}")
 
-
     # Return model, history and metrics
     metrics = {
         'mse': mse,
@@ -512,4 +534,4 @@ Create and train CNN model with standard training (no custom weighting)
         'v_grade_accuracy_one': v_grade_accuracy_one
     }
 
-    return model, history, metrics, loss_name
+    return model, history, metrics, loss_display_name  # Return the display name
