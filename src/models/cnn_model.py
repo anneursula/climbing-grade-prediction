@@ -13,7 +13,7 @@ from collections import Counter
 
 
 def create_simple_balanced_loss(grade_counts_dict):
-    """Simpler version with class balancing similar to sklearn"""
+    """Progressive weighting that gets more aggressive for rarer grades"""
     
     total_samples = sum(grade_counts_dict.values())
     n_classes = len(grade_counts_dict)
@@ -25,11 +25,22 @@ def create_simple_balanced_loss(grade_counts_dict):
         vgrade = difficulty_to_vgrade(difficulty)
         count = grade_counts_dict.get(vgrade, 1)
         
-        # Standard class balancing: total_samples / (n_classes * count)
-        weight = total_samples / (n_classes * count)
+        # Calculate base weight
+        base_weight = total_samples / (n_classes * count)
         
-        # But cap the weights to prevent extremes
-        weight = min(weight, 5.0)  # No weight more than 5x
+        # Progressive scaling: more aggressive for rarer grades
+        if base_weight <= 2.0:
+            # Common grades: minimal adjustment
+            weight = base_weight
+        elif base_weight <= 5.0:
+            # Uncommon grades: moderate boost
+            weight = base_weight * 1.2
+        else:
+            # Rare grades: more aggressive boost
+            weight = base_weight * 1.5
+        
+        # Higher cap but still reasonable
+        weight = min(weight, 10.0)
         
         difficulties.append(float(difficulty))
         weights.append(weight)
@@ -37,7 +48,7 @@ def create_simple_balanced_loss(grade_counts_dict):
     difficulty_tensor = tf.constant(difficulties, dtype=tf.float32)
     weight_tensor = tf.constant(weights, dtype=tf.float32)
     
-    def simple_weighted_mse_loss(y_true, y_pred):
+    def progressive_weighted_mse_loss(y_true, y_pred):
         base_mse = tf.square(y_true - y_pred)
         y_true_rounded = tf.round(tf.clip_by_value(y_true, 0.0, 44.0))
         indices = tf.cast(y_true_rounded, tf.int32)
@@ -45,7 +56,7 @@ def create_simple_balanced_loss(grade_counts_dict):
         weighted_mse = base_mse * tf.expand_dims(sample_weights, -1)
         return tf.reduce_mean(weighted_mse)
     
-    return simple_weighted_mse_loss
+    return progressive_weighted_mse_loss
 
 
 def encode_hold_types(placements_str):
@@ -420,16 +431,18 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test, loss_na
     z = layers.Dense(1024, activation='relu')(combined)
     z = layers.BatchNormalization()(z)
     z = layers.Dropout(0.2)(z)
+
     z = layers.Dense(512, activation='relu')(z)
     z = layers.BatchNormalization()(z)
     z = layers.Dropout(0.2)(z)
+
     z = layers.Dense(256, activation='relu')(z)
     z = layers.Dropout(0.2)(z)
     z = layers.Dense(128, activation='relu')(z)
 
     z = layers.Dense(64, activation='relu')(z)
     z = layers.Dropout(0.2)(z)
-    output = layers.Dense(1)(z)  # Single continuous output
+    output = layers.Dense(1)(z)  
     
     # Create model
     model = models.Model(inputs=[grid_input, numerical_input], outputs=output)
@@ -476,7 +489,7 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test, loss_na
         [train_grids, train_features],
         y_train,
         epochs=25,
-        batch_size=64,
+        batch_size=32,
         validation_split=0.2,
         verbose=1,
         callbacks=[early_stopping]

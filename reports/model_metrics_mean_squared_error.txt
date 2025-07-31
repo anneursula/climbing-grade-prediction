@@ -2,9 +2,9 @@ CNN Model Evaluation Metrics - Mean Squared Error
 ==================================================
 Loss Function Used: Mean Squared Error
 --------------------------------------------------
-mse: 5.1684
-rmse: 2.2734
-mae: 1.7577
-r2: 0.6746
-v_grade_accuracy: 0.3467
-v_grade_accuracy_one: 0.8243
+mse: 4.6293
+rmse: 2.1516
+mae: 1.6779
+r2: 0.7038
+v_grade_accuracy: 0.3588
+v_grade_accuracy_one: 0.8247
