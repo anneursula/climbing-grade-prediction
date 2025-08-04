@@ -10,10 +10,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from ..features.grade_conversion import difficulty_to_vgrade, vgrade_to_difficulty
 from collections import Counter
+from src.models.feature_analysis import comprehensive_feature_analysis
 
 
 def create_simple_balanced_loss(grade_counts_dict):
-    """Progressive weighting that gets more aggressive for rarer grades"""
+    """custom weighting that gets more aggressive for rarer grades"""
     
     total_samples = sum(grade_counts_dict.values())
     n_classes = len(grade_counts_dict)
@@ -454,6 +455,7 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test, loss_na
         decay_rate=0.95)
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
+
     # Choose the loss function 
     if loss_name == "custom_loss":
         # Create custom weighted loss function
@@ -494,6 +496,11 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test, loss_na
         verbose=1,
         callbacks=[early_stopping]
         )
+    
+    # analyze feature importance
+    numerical_imp, channel_imp = comprehensive_feature_analysis(
+    model, test_grids, test_features, y_test
+    )
 
     # Evaluate on test set
     test_results = model.evaluate([test_grids, test_features], y_test, verbose=1)

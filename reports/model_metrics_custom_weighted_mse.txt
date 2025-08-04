@@ -2,9 +2,9 @@ CNN Model Evaluation Metrics - Custom Weighted MSE
 ==================================================
 Loss Function Used: Custom Weighted MSE
 --------------------------------------------------
-mse: 4.5122
-rmse: 2.1242
-mae: 1.6367
-r2: 0.7180
-v_grade_accuracy: 0.3752
-v_grade_accuracy_one: 0.8366
+mse: 4.5673
+rmse: 2.1371
+mae: 1.6773
+r2: 0.7110
+v_grade_accuracy: 0.3615
+v_grade_accuracy_one: 0.8286
