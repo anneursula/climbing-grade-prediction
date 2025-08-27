@@ -1,4 +1,4 @@
-# main.py - Clean version using pre-processed quality data
+# main.py
 
 import pandas as pd
 import numpy as np
@@ -85,13 +85,13 @@ def main():
             loss_name=loss_to_use
         )
         
-        # Create file names that include the loss function name (sanitized for filenames)
+        # Create file names that include the loss function name
         safe_loss_name = loss_display_name.replace(' ', '_').replace('/', '_').lower()
         
         # Plot training history
         history_plot = plot_training_history(history)
         history_plot.savefig(f"reports/figures/model_training_history_{safe_loss_name}.png")
-        plt.close()  # Close the plot to free memory
+        plt.close() 
         
         # Save model metrics with loss name in filename
         with open(f"reports/model_metrics_{safe_loss_name}.txt", "w") as f:

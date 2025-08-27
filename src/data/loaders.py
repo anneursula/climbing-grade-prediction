@@ -172,7 +172,7 @@ def download_kilterboard_data(supabase_url, supabase_key, output_dir="data"):
     # Additionally, try to get specific climb data with related information
     try:
         print("Attempting to fetch detailed climb information...")
-        # This is a more advanced query that might work if the schema allows it
+
         response = supabase.table("climbs").select("*, setters(*)").execute()
         if response.data:
             save_data_to_csv(response.data, "climbs_with_setters", output_dir)

@@ -24,7 +24,7 @@ def difficulty_to_vgrade(difficulty):
     if difficulty is None or pd.isna(difficulty):
         return "N/A"
 
-    # Detailed and precise conversion
+    # grade conversion
     if difficulty < 8:
         return "VB"
     elif difficulty < 10:

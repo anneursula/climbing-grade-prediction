@@ -31,7 +31,7 @@ def create_simple_balanced_loss(grade_counts_dict):
         
         # Progressive scaling: more aggressive for rarer grades
         if base_weight <= 2.0:
-            # Common grades: minimal adjustment
+            # Common grades: no adjustment
             weight = base_weight
         elif base_weight <= 5.0:
             # Uncommon grades: moderate boost
@@ -247,7 +247,7 @@ def create_hold_feature_vector(placements_str, hold_data_df):
         
         return [
             avg_orientation / 360.0,  # Normalize
-            avg_depth / 3.0,          # Normalize (assuming max depth ~3)
+            avg_depth / 3.0,          # Normalize
             std_orientation / 360.0,
             std_depth / 5.0,
             hold_counts['START'],
@@ -367,17 +367,6 @@ def create_cnn_model(df, hold_data_df, X_train, X_test, y_train, y_test, loss_na
     # Use SAME parameters for standardization on test data
     X_test_scaled[feature_cols] = scaler.transform(X_test_clipped[feature_cols])
 
-    # Verify scaling worked properly
-    print("Feature ranges after clipping + scaling:")
-    for col in feature_cols:
-        col_min = X_train_scaled[col].min()
-        col_max = X_train_scaled[col].max()
-        print(f"  {col}: {col_min:.2f} to {col_max:.2f}")
-        if abs(col_max) > 10 or abs(col_min) > 10:
-            print(f"    ⚠️  WARNING: {col} still has extreme values!")
-        else:
-            print(f"    ✓ {col} looks good!")
-   
 
     # Create multichannel grids from placements
     train_grids = np.array([create_multichannel_grid(p, hold_data_df) for p in X_train['placements']])
